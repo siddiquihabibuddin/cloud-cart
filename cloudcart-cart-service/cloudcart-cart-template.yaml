@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '[DEV] Lambda functions with DynamoDB and REST API Gateway for cart management'
+
+Resources:
+
+  ### DynamoDB Table for Cart ###
+  CartTableDev:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CartTableDev
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: productId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+        - AttributeName: productId
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  ### IAM Role for Cart Lambda ###
+  CartLambdaExecutionRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CartLambdaExecutionRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DevCartDynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                Resource: !GetAtt CartTableDev.Arn
+
+  ### Lambda Functions ###
+  AddToCartFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: AddToCartFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.cart.handler.AddToCartHandler::handleRequest
+      Role: !GetAtt CartLambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: cart-service-1.0.0.jar
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          CART_TABLE: !Ref CartTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ViewCartFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ViewCartFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.cart.handler.ViewCartHandler::handleRequest
+      Role: !GetAtt CartLambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: cart-service-1.0.0.jar
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          CART_TABLE: !Ref CartTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  RemoveFromCartFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: RemoveFromCartFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.cart.handler.RemoveFromCartHandler::handleRequest
+      Role: !GetAtt CartLambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: cart-service-1.0.0.jar
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          CART_TABLE: !Ref CartTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  UpdateQuantityFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: UpdateQuantityFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.cart.handler.UpdateQuantityHandler::handleRequest
+      Role: !GetAtt CartLambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: cart-service-1.0.0.jar
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          CART_TABLE: !Ref CartTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### Lambda Permissions for API Gateway ###
+  AddToCartInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AddToCartFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CartApiDev}/*/*
+
+  ViewCartInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ViewCartFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CartApiDev}/*/*
+
+  RemoveFromCartInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RemoveFromCartFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CartApiDev}/*/*
+
+  UpdateQuantityInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref UpdateQuantityFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CartApiDev}/*/*
+
+  ### REST API ###
+  CartApiDev:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: CartApiDev
+
+  ### Resources: /cart, /cart/{userId}, /cart/{userId}/{productId} ###
+  CartResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ParentId: !GetAtt CartApiDev.RootResourceId
+      PathPart: cart
+
+  CartUserIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ParentId: !Ref CartResourceDev
+      PathPart: "{userId}"
+
+  CartProductIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ParentId: !Ref CartUserIdResourceDev
+      PathPart: "{productId}"
+
+  ### Methods ###
+  PostCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ResourceId: !Ref CartResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddToCartFunctionDev.Arn}/invocations
+
+  GetCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ResourceId: !Ref CartUserIdResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ViewCartFunctionDev.Arn}/invocations
+
+  DeleteCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ResourceId: !Ref CartProductIdResourceDev
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RemoveFromCartFunctionDev.Arn}/invocations
+
+  PatchCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ResourceId: !Ref CartProductIdResourceDev
+      HttpMethod: PATCH
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpdateQuantityFunctionDev.Arn}/invocations
+
+  ### Deployment & Stage ###
+  CartApiDeploymentDev:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PostCartMethodDev
+      - GetCartMethodDev
+      - DeleteCartMethodDev
+      - PatchCartMethodDev
+    Properties:
+      RestApiId: !Ref CartApiDev
+
+  CartApiStageDev:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref CartApiDev
+      DeploymentId: !Ref CartApiDeploymentDev
+      StageName: dev
+
+Outputs:
+
+  DevCartApiEndpoint:
+    Description: "[DEV] Cart API base URL"
+    Value: !Sub "https://${CartApiDev}.execute-api.${AWS::Region}.amazonaws.com/dev"
+
+  DevCartTableName:
+    Description: "DynamoDB table used for cart"
+    Value: !Ref CartTableDev

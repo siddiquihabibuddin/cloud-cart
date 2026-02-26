@@ -1,0 +1,255 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '[DEV] Lambda functions with DynamoDB and REST API Gateway for product management'
+
+Resources:
+
+  ### DynamoDB Table ###
+  ProductsTableDev:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ProductsTableDev
+      AttributeDefinitions:
+        - AttributeName: productID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productID
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  ### IAM Role ###
+  LambdaExecutionRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaExecutionRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DevDynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                Resource: !GetAtt ProductsTableDev.Arn
+
+  ### Lambda Functions ###
+  ListProductsFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ListProductsFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.product.handler.ListProductsHandler::handleRequest
+      Role: !GetAtt LambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: product-catalog-1.0.0.jar
+      Timeout: 20
+      MemorySize: 128
+      Environment:
+        Variables:
+          PRODUCTS_TABLE: !Ref ProductsTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  CreateProductFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CreateProductFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.product.handler.CreateProductHandler::handleRequest
+      Role: !GetAtt LambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: product-catalog-1.0.0.jar
+      Timeout: 20
+      MemorySize: 128
+      Environment:
+        Variables:
+          PRODUCTS_TABLE: !Ref ProductsTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  GetProductFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetProductFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.product.handler.GetProductHandler::handleRequest
+      Role: !GetAtt LambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: product-catalog-1.0.0.jar
+      Timeout: 20
+      MemorySize: 128
+      Environment:
+        Variables:
+          PRODUCTS_TABLE: !Ref ProductsTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  UpdateStockFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: UpdateStockFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.product.handler.UpdateStockHandler::handleRequest
+      Role: !GetAtt LambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: product-catalog-1.0.0.jar
+      Timeout: 20
+      MemorySize: 128
+      Environment:
+        Variables:
+          PRODUCTS_TABLE: !Ref ProductsTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### Lambda Permissions for API Gateway ###
+  ListProductsInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ListProductsFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProductApiDev}/*/*
+
+  CreateProductInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CreateProductFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProductApiDev}/*/*
+
+  GetProductInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetProductFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProductApiDev}/*/*
+
+  UpdateStockInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref UpdateStockFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProductApiDev}/*/*
+
+  ### REST API ###
+  ProductApiDev:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: ProductApiDev
+
+  ### Resources: /products, /products/{id}, /products/{id}/stock ###
+  ProductsResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      ParentId: !GetAtt ProductApiDev.RootResourceId
+      PathPart: products
+
+  ProductIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      ParentId: !Ref ProductsResourceDev
+      PathPart: "{id}"
+
+  ProductStockResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      ParentId: !Ref ProductIdResourceDev
+      PathPart: stock
+
+  ### Methods ###
+  GetProductsMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      ResourceId: !Ref ProductsResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ListProductsFunctionDev.Arn}/invocations
+
+  PostProductsMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      ResourceId: !Ref ProductsResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateProductFunctionDev.Arn}/invocations
+
+  GetProductByIdMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      ResourceId: !Ref ProductIdResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetProductFunctionDev.Arn}/invocations
+
+  PatchStockMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      ResourceId: !Ref ProductStockResourceDev
+      HttpMethod: PATCH
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpdateStockFunctionDev.Arn}/invocations
+
+  ### Deployment & Stage ###
+  ProductApiDeploymentDev:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetProductsMethodDev
+      - PostProductsMethodDev
+      - GetProductByIdMethodDev
+      - PatchStockMethodDev
+    Properties:
+      RestApiId: !Ref ProductApiDev
+
+  ProductApiStageDev:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref ProductApiDev
+      DeploymentId: !Ref ProductApiDeploymentDev
+      StageName: dev
+
+Outputs:
+  DevApiEndpoint:
+    Description: "[DEV] Product API base URL"
+    Value: !Sub "https://${ProductApiDev}.execute-api.${AWS::Region}.amazonaws.com/dev"
+
+  DevTableName:
+    Description: "Name of the DynamoDB table for dev"
+    Value: !Ref ProductsTableDev

@@ -1,0 +1,20 @@
+{
+  "productID": {
+    "S": "2"
+  },
+  "title": {
+    "S": "dbbd"
+  },
+  "category": {
+    "S": "bbfd"
+  },
+  "imageUrl": {
+    "S": "imageUrl2"
+  },
+  "price": {
+    "N": "12"
+  },
+  "stock": {
+    "N": "13"
+  }
+}

@@ -1,0 +1,248 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '[DEV] Order service - Lambda, DynamoDB, SQS, REST API Gateway'
+
+Resources:
+
+  ### DynamoDB Table for Orders ###
+  OrdersTableDev:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: OrdersTableDev
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: userId-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  ### SQS Queue for Order Events ###
+  OrderPlacedQueueDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderPlacedQueueDev
+      VisibilityTimeout: 60
+
+  ### IAM Role for Order Lambdas ###
+  OrderLambdaRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrderLambdaRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OrderDynamoSQSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt OrdersTableDev.Arn
+                  - !Sub "${OrdersTableDev.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt OrderPlacedQueueDev.Arn
+
+  ### Lambda Functions ###
+  PlaceOrderFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PlaceOrderFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.order.handler.PlaceOrderHandler::handleRequest
+      Role: !GetAtt OrderLambdaRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: order-service-1.0.0.jar
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTableDev
+          ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  GetOrderFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetOrderFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.order.handler.GetOrderHandler::handleRequest
+      Role: !GetAtt OrderLambdaRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: order-service-1.0.0.jar
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTableDev
+          ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ListOrdersFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ListOrdersFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.order.handler.ListOrdersHandler::handleRequest
+      Role: !GetAtt OrderLambdaRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: order-service-1.0.0.jar
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTableDev
+          ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### Lambda Permissions for API Gateway ###
+  PlaceOrderInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PlaceOrderFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${OrderApiDev}/*/*
+
+  GetOrderInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetOrderFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${OrderApiDev}/*/*
+
+  ListOrdersInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ListOrdersFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${OrderApiDev}/*/*
+
+  ### REST API ###
+  OrderApiDev:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: OrderApiDev
+
+  ### Resource: /orders ###
+  OrdersResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref OrderApiDev
+      ParentId: !GetAtt OrderApiDev.RootResourceId
+      PathPart: orders
+
+  ### Resource: /orders/{orderId} ###
+  OrderByIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref OrderApiDev
+      ParentId: !Ref OrdersResourceDev
+      PathPart: "{orderId}"
+
+  ### Methods ###
+  PostOrderMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref OrderApiDev
+      ResourceId: !Ref OrdersResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PlaceOrderFunctionDev.Arn}/invocations
+
+  GetOrderMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref OrderApiDev
+      ResourceId: !Ref OrderByIdResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOrderFunctionDev.Arn}/invocations
+
+  ListOrdersMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref OrderApiDev
+      ResourceId: !Ref OrdersResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ListOrdersFunctionDev.Arn}/invocations
+
+  ### Deployment & Stage ###
+  OrderApiDeploymentDev:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PostOrderMethodDev
+      - GetOrderMethodDev
+      - ListOrdersMethodDev
+    Properties:
+      RestApiId: !Ref OrderApiDev
+
+  OrderApiStageDev:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref OrderApiDev
+      DeploymentId: !Ref OrderApiDeploymentDev
+      StageName: dev
+
+Outputs:
+
+  OrderQueueArn:
+    Description: "ARN of the order placed SQS queue"
+    Value: !GetAtt OrderPlacedQueueDev.Arn
+    Export:
+      Name: cloudcart-order-OrderQueueArn
+
+  OrderQueueUrl:
+    Description: "URL of the order placed SQS queue"
+    Value: !Ref OrderPlacedQueueDev
+    Export:
+      Name: cloudcart-order-OrderQueueUrl
+
+  OrdersTableName:
+    Description: "DynamoDB table name for orders"
+    Value: !Ref OrdersTableDev
+    Export:
+      Name: cloudcart-order-OrdersTableName
+
+  OrderApiEndpoint:
+    Description: "[DEV] Order API base URL"
+    Value: !Sub "https://${OrderApiDev}.execute-api.${AWS::Region}.amazonaws.com/dev"

@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '[DEV] Payment service - Lambda triggered by SQS, updates order status in DynamoDB'
+
+Resources:
+
+  ### IAM Role for Payment Lambda ###
+  PaymentLambdaRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PaymentLambdaRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PaymentSQSDynamoAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !ImportValue cloudcart-order-OrderQueueArn
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
+
+  ### Payment Lambda Function ###
+  ProcessPaymentFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ProcessPaymentFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.payment.handler.ProcessPaymentHandler::handleRequest
+      Role: !GetAtt PaymentLambdaRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: payment-service-1.0.0.jar
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### SQS Event Source Mapping ###
+  OrderQueueEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue cloudcart-order-OrderQueueArn
+      FunctionName: !GetAtt ProcessPaymentFunctionDev.Arn
+      BatchSize: 5
+      Enabled: true

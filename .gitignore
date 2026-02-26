@@ -1,0 +1,24 @@
+# Maven build output
+target/
+*.jar
+
+# Node / Next.js
+node_modules/
+.next/
+cloudcart-frontend/.next/
+cloudcart-frontend/node_modules/
+
+# Env files with secrets
+.env.local
+.env*.local
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
+
+# AWS / LocalStack
+.aws/
