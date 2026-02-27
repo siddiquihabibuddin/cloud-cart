@@ -1,16 +1,9 @@
 import type { NextConfig } from "next";
 
-const PRODUCTS_API =
-  process.env.NEXT_PUBLIC_PRODUCTS_API_INTERNAL ||
-  "http://localhost:4566/restapis/26xqmiqwkx/dev/_user_request_";
-
-const CART_API =
-  process.env.NEXT_PUBLIC_CART_API_INTERNAL ||
-  "http://localhost:4566/restapis/gppxzj7nt9/dev/_user_request_";
-
-// Order API ID is set after first deploy via NEXT_PUBLIC_ORDER_API_INTERNAL env var
-const ORDER_API =
-  process.env.NEXT_PUBLIC_ORDER_API_INTERNAL ||
+// Single unified API gateway — all service routes go through one endpoint.
+// Set NEXT_PUBLIC_UNIFIED_API_INTERNAL after deploying cloudcart-gateway-dev stack.
+const UNIFIED_API =
+  process.env.NEXT_PUBLIC_UNIFIED_API_INTERNAL ||
   "http://localhost:4566/restapis/PLACEHOLDER/dev/_user_request_";
 
 const nextConfig: NextConfig = {
@@ -23,15 +16,15 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api-products/:path*",
-        destination: `${PRODUCTS_API}/:path*`,
+        destination: `${UNIFIED_API}/:path*`,
       },
       {
         source: "/api-cart/:path*",
-        destination: `${CART_API}/:path*`,
+        destination: `${UNIFIED_API}/:path*`,
       },
       {
         source: "/api-orders/:path*",
-        destination: `${ORDER_API}/:path*`,
+        destination: `${UNIFIED_API}/:path*`,
       },
     ];
   },

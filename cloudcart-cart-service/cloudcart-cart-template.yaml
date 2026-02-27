@@ -259,3 +259,23 @@ Outputs:
   DevCartTableName:
     Description: "DynamoDB table used for cart"
     Value: !Ref CartTableDev
+
+  AddToCartFunctionArn:
+    Value: !GetAtt AddToCartFunctionDev.Arn
+    Export:
+      Name: cloudcart-cart-AddToCartFunctionArn
+
+  ViewCartFunctionArn:
+    Value: !GetAtt ViewCartFunctionDev.Arn
+    Export:
+      Name: cloudcart-cart-ViewCartFunctionArn
+
+  RemoveFromCartFunctionArn:
+    Value: !GetAtt RemoveFromCartFunctionDev.Arn
+    Export:
+      Name: cloudcart-cart-RemoveFromCartFunctionArn
+
+  UpdateQuantityFunctionArn:
+    Value: !GetAtt UpdateQuantityFunctionDev.Arn
+    Export:
+      Name: cloudcart-cart-UpdateQuantityFunctionArn

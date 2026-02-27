@@ -259,3 +259,23 @@ Outputs:
     Value: !Sub "http://host.docker.internal:4566/restapis/${ProductApiDev}/dev/_user_request_"
     Export:
       Name: cloudcart-products-ProductApiInternalUrl
+
+  ListProductsFunctionArn:
+    Value: !GetAtt ListProductsFunctionDev.Arn
+    Export:
+      Name: cloudcart-products-ListProductsFunctionArn
+
+  CreateProductFunctionArn:
+    Value: !GetAtt CreateProductFunctionDev.Arn
+    Export:
+      Name: cloudcart-products-CreateProductFunctionArn
+
+  GetProductFunctionArn:
+    Value: !GetAtt GetProductFunctionDev.Arn
+    Export:
+      Name: cloudcart-products-GetProductFunctionArn
+
+  UpdateStockFunctionArn:
+    Value: !GetAtt UpdateStockFunctionDev.Arn
+    Export:
+      Name: cloudcart-products-UpdateStockFunctionArn

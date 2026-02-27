@@ -74,6 +74,12 @@ cf_deploy \
   --stack-name cloudcart-shipment-dev \
   --capabilities CAPABILITY_NAMED_IAM
 
+echo "==> Deploying unified gateway stack..."
+cf_deploy \
+  --template-file "cloudcart-gateway-template.yaml" \
+  --stack-name cloudcart-gateway-dev \
+  --capabilities CAPABILITY_IAM
+
 echo ""
 echo "==> Stack outputs:"
 echo "--- Cart service ---"
@@ -100,9 +106,15 @@ awslocal cloudformation describe-stacks \
   --query "Stacks[0].Outputs" \
   --output table
 
+echo "--- Unified gateway ---"
+awslocal cloudformation describe-stacks \
+  --stack-name cloudcart-gateway-dev \
+  --query "Stacks[0].Outputs" \
+  --output table
+
 echo ""
-echo "==> Next step: grab the Order API ID from the output above and set"
-echo "    NEXT_PUBLIC_ORDER_API_INTERNAL=http://localhost:4566/restapis/<order-api-id>/dev/_user_request_"
+echo "==> Next step: grab the UnifiedApiInternalUrl from the gateway output above and set"
+echo "    NEXT_PUBLIC_UNIFIED_API_INTERNAL=http://localhost:4566/restapis/<gateway-api-id>/dev/_user_request_"
 echo "    in cloudcart-frontend/.env.local, then restart the frontend dev server."
 echo ""
 bash "$(dirname "$0")/seed-products.sh"

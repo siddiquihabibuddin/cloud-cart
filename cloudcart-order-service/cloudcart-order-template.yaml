@@ -379,3 +379,23 @@ Outputs:
   OrderApiEndpoint:
     Description: "[DEV] Order API base URL"
     Value: !Sub "https://${OrderApiDev}.execute-api.${AWS::Region}.amazonaws.com/dev"
+
+  PlaceOrderFunctionArn:
+    Value: !GetAtt PlaceOrderFunctionDev.Arn
+    Export:
+      Name: cloudcart-order-PlaceOrderFunctionArn
+
+  GetOrderFunctionArn:
+    Value: !GetAtt GetOrderFunctionDev.Arn
+    Export:
+      Name: cloudcart-order-GetOrderFunctionArn
+
+  ListOrdersFunctionArn:
+    Value: !GetAtt ListOrdersFunctionDev.Arn
+    Export:
+      Name: cloudcart-order-ListOrdersFunctionArn
+
+  OrderApiKeyId:
+    Value: !Ref OrderApiKeyDev
+    Export:
+      Name: cloudcart-order-OrderApiKeyId

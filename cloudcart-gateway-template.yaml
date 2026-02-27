@@ -1,0 +1,373 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '[DEV] Unified API Gateway — single entry point for all CloudCart services'
+
+Resources:
+
+  ### REST API ###
+  UnifiedApiDev:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: UnifiedApiDev
+
+  ### Top-level resources ###
+  ProductsResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !GetAtt UnifiedApiDev.RootResourceId
+      PathPart: products
+
+  CartResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !GetAtt UnifiedApiDev.RootResourceId
+      PathPart: cart
+
+  OrdersResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !GetAtt UnifiedApiDev.RootResourceId
+      PathPart: orders
+
+  ### /products/{id} and /products/{id}/stock ###
+  ProductIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref ProductsResourceDev
+      PathPart: "{id}"
+
+  ProductStockResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref ProductIdResourceDev
+      PathPart: stock
+
+  ### /cart/{userId} and /cart/{userId}/{productId} ###
+  CartUserIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref CartResourceDev
+      PathPart: "{userId}"
+
+  CartProductIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref CartUserIdResourceDev
+      PathPart: "{productId}"
+
+  ### /orders/{orderId} ###
+  OrderByIdResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref OrdersResourceDev
+      PathPart: "{orderId}"
+
+  ### Lambda permissions — allow UnifiedApiDev to invoke every function ###
+  ListProductsPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-products-ListProductsFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  CreateProductPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-products-CreateProductFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  GetProductPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-products-GetProductFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  UpdateStockPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-products-UpdateStockFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  AddToCartPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-cart-AddToCartFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  ViewCartPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-cart-ViewCartFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  RemoveFromCartPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-cart-RemoveFromCartFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  UpdateQuantityPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-cart-UpdateQuantityFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  PlaceOrderPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-order-PlaceOrderFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  GetOrderPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-order-GetOrderFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  ListOrdersPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-order-ListOrdersFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  ### Methods — Products ###
+  GetProductsMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref ProductsResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-products-ListProductsFunctionArn
+
+  PostProductsMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref ProductsResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-products-CreateProductFunctionArn
+
+  GetProductByIdMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref ProductIdResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-products-GetProductFunctionArn
+
+  PatchStockMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref ProductStockResourceDev
+      HttpMethod: PATCH
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-products-UpdateStockFunctionArn
+
+  ### Methods — Cart ###
+  PostCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref CartResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-cart-AddToCartFunctionArn
+
+  GetCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref CartUserIdResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-cart-ViewCartFunctionArn
+
+  DeleteCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref CartProductIdResourceDev
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-cart-RemoveFromCartFunctionArn
+
+  PatchCartMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref CartProductIdResourceDev
+      HttpMethod: PATCH
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-cart-UpdateQuantityFunctionArn
+
+  ### Methods — Orders (API key required) ###
+  PostOrderMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref OrdersResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-order-PlaceOrderFunctionArn
+
+  ListOrdersMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref OrdersResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-order-ListOrdersFunctionArn
+
+  GetOrderMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref OrderByIdResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-order-GetOrderFunctionArn
+
+  ### Deployment & Stage ###
+  UnifiedApiDeploymentDev:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetProductsMethodDev
+      - PostProductsMethodDev
+      - GetProductByIdMethodDev
+      - PatchStockMethodDev
+      - PostCartMethodDev
+      - GetCartMethodDev
+      - DeleteCartMethodDev
+      - PatchCartMethodDev
+      - PostOrderMethodDev
+      - ListOrdersMethodDev
+      - GetOrderMethodDev
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+
+  UnifiedApiStageDev:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      DeploymentId: !Ref UnifiedApiDeploymentDev
+      StageName: dev
+
+  ### Usage Plan for /orders endpoints — reuses the existing API key from the order stack ###
+  UnifiedUsagePlanDev:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: UnifiedApiStageDev
+    Properties:
+      UsagePlanName: UnifiedUsagePlanDev
+      ApiStages:
+        - ApiId: !Ref UnifiedApiDev
+          Stage: dev
+
+  UnifiedUsagePlanKeyDev:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !ImportValue cloudcart-order-OrderApiKeyId
+      KeyType: API_KEY
+      UsagePlanId: !Ref UnifiedUsagePlanDev
+
+Outputs:
+
+  UnifiedApiEndpoint:
+    Description: "[DEV] Unified API base URL"
+    Value: !Sub "https://${UnifiedApiDev}.execute-api.${AWS::Region}.amazonaws.com/dev"
+
+  UnifiedApiInternalUrl:
+    Description: "Internal LocalStack URL for unified API (for frontend next.config.ts)"
+    Value: !Sub "http://host.docker.internal:4566/restapis/${UnifiedApiDev}/dev/_user_request_"
+    Export:
+      Name: cloudcart-gateway-UnifiedApiInternalUrl

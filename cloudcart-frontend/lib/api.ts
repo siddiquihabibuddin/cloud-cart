@@ -10,6 +10,7 @@ export const cartApi = axios.create({
 
 export const ordersApi = axios.create({
   baseURL: process.env.NEXT_PUBLIC_ORDER_API,
+  headers: { "x-api-key": "cloudcart-dev-key-2024" },
 });
 
 export async function placeOrder(
