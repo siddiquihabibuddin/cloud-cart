@@ -72,8 +72,8 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/orders` | Place order — atomic stock reservation, returns 409 if insufficient |
-| `GET` | `/orders/{orderId}` | Get order (includes `trackingId` and `shippedAt` once shipped) |
-| `GET` | `/orders?userId=X` | List user's orders |
+| `GET` | `/orders/{orderId}?userId=X` | Get order — `userId` required; returns 403 if it doesn't match the order owner (includes `trackingId` and `shippedAt` once shipped) |
+| `GET` | `/orders?userId=X` | List user's orders — queries `userId-index` GSI |
 
 `POST /orders` accepts an optional `Idempotency-Key` header — repeated requests with the same key return the cached response for 24 hours.
 
@@ -88,9 +88,12 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
    - Order saved as **PENDING**, `OrderPlacedEvent` published to `OrderPlacedQueueDev`
    - Successful response is cached in `IdempotencyTableDev`
 3. Payment Lambda consumes the event → **80% PAID / 20% FAILED**
+   - Uses conditional `UpdateItem` (`attribute_exists(orderId) AND status = PENDING`) — idempotent on retry
+   - If FAILED → releases reserved stock via `PATCH /products/{id}/stock {"release":N}` for each item
    - Failed records are reported via `ReportBatchItemFailures` — retried up to 3× before landing in `OrderPlacedDLQDev`
    - If PAID → publishes `PaymentSuccessEvent` to `PaymentSuccessQueueDev`
 4. Shipment Lambda consumes the payment event → generates `TRK-XXXXXXXX` tracking ID
+   - Uses conditional `UpdateItem` (`status = PAID`) — idempotent on retry; duplicate deliveries skip silently, preserving the original `trackingId`
    - Order updated to **SHIPPED** with `trackingId` and `shippedAt`
    - Failed records retry up to 3× before landing in `PaymentSuccessDLQDev`
 5. Checkout page polls `GET /orders/{id}` every 2s — status progresses PENDING → PAID → SHIPPED
@@ -102,6 +105,9 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 | **Idempotency** | `POST /orders` deduplicates on `Idempotency-Key` header; results cached 24h in DynamoDB |
 | **Stock reservation via API** | Order service calls `PATCH /products/{id}/stock {"reserve":N}` on the product catalog API; on failure a compensating `{"release":N}` call rolls back already-reserved items. Services own their own data — no cross-service DynamoDB access. |
 | **Dead Letter Queues** | `OrderPlacedDLQDev` and `PaymentSuccessDLQDev`; messages moved after 3 failed delivery attempts |
+| **Order ownership check** | `GET /orders/{orderId}` requires `?userId=X`; returns 403 if it doesn't match the order's owner |
+| **GSI Query for order listing** | `GET /orders?userId=X` queries the `userId-index` GSI — O(results), not O(table) |
+| **Shipment idempotency** | Shipment `UpdateItem` conditions on `status = PAID`; duplicate SQS deliveries skip silently, preserving the original `trackingId` |
 | **Batch item failures** | Payment and shipment Lambdas return `batchItemFailures` so only failed records are retried |
 | **API key auth** | All order endpoints require `x-api-key: cloudcart-dev-key-2024` |
 | **Input validation** | 400s for blank fields, quantity < 1, negative prices, non-numeric pagination params |
