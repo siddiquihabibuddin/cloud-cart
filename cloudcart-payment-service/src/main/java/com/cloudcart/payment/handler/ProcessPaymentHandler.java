@@ -21,6 +21,9 @@ import software.amazon.awssdk.services.sqs.SqsClientBuilder;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,8 +35,10 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Payments");
     private static final DynamoDbClient DYNAMO_CLIENT;
     private static final SqsClient SQS_CLIENT;
+    private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
     private static final String ORDERS_TABLE = System.getenv("ORDERS_TABLE");
     private static final String PAYMENT_SUCCESS_QUEUE_URL = System.getenv("PAYMENT_SUCCESS_QUEUE_URL");
+    private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
 
     static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
@@ -142,6 +147,12 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
                     }
                 } else {
                     METRICS.count("PaymentFailed");
+                    // Release reserved stock so inventory is restored
+                    if (PRODUCTS_API_URL != null && event.getItems() != null) {
+                        for (com.cloudcart.payment.model.OrderItem item : event.getItems()) {
+                            callReleaseStock(item.getProductId(), item.getQuantity(), logger);
+                        }
+                    }
                 }
 
             } catch (Exception e) {
@@ -156,6 +167,21 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
         }
 
         return buildBatchResponse(failedItems);
+    }
+
+    private void callReleaseStock(String productId, int qty, JsonLogger logger) {
+        try {
+            String body = MAPPER.writeValueAsString(Map.of("release", qty));
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(PRODUCTS_API_URL + "/products/" + productId + "/stock"))
+                    .header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+        } catch (Exception e) {
+            logger.error("Failed to release stock after payment failure", Map.of(
+                    "productId", productId, "error", String.valueOf(e.getMessage())));
+        }
     }
 
     private Map<String, Object> buildBatchResponse(List<Map<String, String>> failedItems) {

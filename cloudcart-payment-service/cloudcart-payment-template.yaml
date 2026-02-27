@@ -60,6 +60,7 @@ Resources:
         Variables:
           ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
           PAYMENT_SUCCESS_QUEUE_URL: !ImportValue cloudcart-order-PaymentSuccessQueueUrl
+          PRODUCTS_API_URL: !ImportValue cloudcart-products-ProductApiInternalUrl
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   ### SQS Event Source Mapping ###

@@ -21,8 +21,9 @@ export async function placeOrder(
 }
 
 export async function getOrder(
-  orderId: string
+  orderId: string,
+  userId: string
 ): Promise<{ orderId: string; userId: string; status: string; totalAmount: number; createdAt: string }> {
-  const res = await ordersApi.get(`/orders/${orderId}`);
+  const res = await ordersApi.get(`/orders/${orderId}`, { params: { userId } });
   return res.data;
 }

@@ -44,12 +44,12 @@ export default function CheckoutPage() {
 
   const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
-  async function pollOrderStatus(orderId: string) {
+  async function pollOrderStatus(orderId: string, uid: string) {
     const maxAttempts = 5;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise((r) => setTimeout(r, 2000));
       try {
-        const order = await getOrder(orderId);
+        const order = await getOrder(orderId, uid);
         setOrderStatus({ orderId, status: order.status as OrderStatus["status"] });
         if (order.status !== "PENDING") return;
       } catch {
@@ -73,7 +73,7 @@ export default function CheckoutPage() {
       const result = await placeOrder(userId, orderItems);
       setOrderStatus({ orderId: result.orderId, status: "PENDING" });
       refreshCartCount();
-      await pollOrderStatus(result.orderId);
+      await pollOrderStatus(result.orderId, userId);
     } catch {
       setError("Failed to place order. Please try again.");
     } finally {

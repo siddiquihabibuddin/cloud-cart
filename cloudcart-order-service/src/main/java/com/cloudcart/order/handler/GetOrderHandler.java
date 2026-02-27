@@ -10,8 +10,8 @@ import java.util.Map;
 
 public class GetOrderHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final OrderRepository repository = new OrderRepository();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final OrderRepository REPOSITORY = new OrderRepository();
 
     @Override
     @SuppressWarnings("unchecked")
@@ -22,17 +22,27 @@ public class GetOrderHandler implements RequestHandler<Map<String, Object>, Map<
                 return response(400, "{\"error\":\"orderId path parameter is required\"}");
             }
 
+            Map<String, String> queryParams = (Map<String, String>) input.get("queryStringParameters");
+            String requestingUserId = queryParams != null ? queryParams.get("userId") : null;
+            if (requestingUserId == null || requestingUserId.isBlank()) {
+                return response(400, "{\"error\":\"userId query parameter is required\"}");
+            }
+
             String orderId = pathParams.get("orderId");
-            Order order = repository.getOrder(orderId);
+            Order order = REPOSITORY.getOrder(orderId);
 
             if (order == null) {
                 return response(404, "{\"error\":\"Order not found\"}");
             }
 
+            if (!requestingUserId.equals(order.getUserId())) {
+                return response(403, "{\"error\":\"Access denied\"}");
+            }
+
             return Map.of(
                     "statusCode", 200,
                     "headers", Map.of("Content-Type", "application/json"),
-                    "body", mapper.writeValueAsString(order)
+                    "body", MAPPER.writeValueAsString(order)
             );
         } catch (Exception e) {
             context.getLogger().log("Error getting order: " + e.getMessage());
