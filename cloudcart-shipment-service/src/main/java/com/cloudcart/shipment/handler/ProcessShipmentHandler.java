@@ -11,6 +11,7 @@ import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
 import java.net.URI;
@@ -63,17 +64,28 @@ public class ProcessShipmentHandler implements RequestHandler<Map<String, Object
                         .replace("-", "").substring(0, 8).toUpperCase();
                 String shippedAt = Instant.now().toString();
 
-                DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
-                        .tableName(ORDERS_TABLE)
-                        .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
-                        .updateExpression("SET #s = :status, trackingId = :tid, shippedAt = :ts")
-                        .expressionAttributeNames(Map.of("#s", "status"))
-                        .expressionAttributeValues(Map.of(
-                                ":status", AttributeValue.fromS("SHIPPED"),
-                                ":tid", AttributeValue.fromS(trackingId),
-                                ":ts", AttributeValue.fromS(shippedAt)
-                        ))
-                        .build());
+                // Condition: order must still be PAID.
+                // - If already SHIPPED (duplicate delivery) → ConditionalCheckFailedException → skip silently (idempotent)
+                // - If in any other state → also skip; this message shouldn't be here
+                try {
+                    DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                            .tableName(ORDERS_TABLE)
+                            .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
+                            .updateExpression("SET #s = :status, trackingId = :tid, shippedAt = :ts")
+                            .conditionExpression("#s = :paid")
+                            .expressionAttributeNames(Map.of("#s", "status"))
+                            .expressionAttributeValues(Map.of(
+                                    ":status", AttributeValue.fromS("SHIPPED"),
+                                    ":tid", AttributeValue.fromS(trackingId),
+                                    ":ts", AttributeValue.fromS(shippedAt),
+                                    ":paid", AttributeValue.fromS("PAID")
+                            ))
+                            .build());
+                } catch (ConditionalCheckFailedException condEx) {
+                    logger.info("Shipment already processed or order not PAID, skipping",
+                            Map.of("orderId", event.getOrderId()));
+                    continue;
+                }
 
                 logger.info("Shipment initiated",
                         Map.of("orderId", event.getOrderId(), "trackingId", trackingId));

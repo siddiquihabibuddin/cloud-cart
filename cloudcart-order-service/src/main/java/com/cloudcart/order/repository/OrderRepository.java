@@ -56,12 +56,11 @@ public class OrderRepository {
     }
 
     public List<Order> listByUser(String userId) {
-        Map<String, AttributeValue> exprValues = Map.of(":uid", AttributeValue.fromS(userId));
-
-        ScanResponse response = dynamoDbClient.scan(ScanRequest.builder()
+        QueryResponse response = dynamoDbClient.query(QueryRequest.builder()
                 .tableName(tableName)
-                .filterExpression("userId = :uid")
-                .expressionAttributeValues(exprValues)
+                .indexName("userId-index")
+                .keyConditionExpression("userId = :uid")
+                .expressionAttributeValues(Map.of(":uid", AttributeValue.fromS(userId)))
                 .build());
 
         List<Order> orders = new ArrayList<>();
