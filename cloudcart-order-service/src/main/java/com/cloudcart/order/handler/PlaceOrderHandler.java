@@ -8,12 +8,17 @@ import com.cloudcart.order.model.OrderPlacedEvent;
 import com.cloudcart.order.repository.OrderRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
+import software.amazon.awssdk.services.dynamodb.model.*;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -23,15 +28,24 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
     private final ObjectMapper mapper = new ObjectMapper();
     private final OrderRepository repository = new OrderRepository();
     private final SqsClient sqsClient;
+    private final DynamoDbClient productsClient;
     private final String queueUrl = System.getenv("ORDER_QUEUE_URL");
+    private final String productsTable = System.getenv("PRODUCTS_TABLE");
 
     public PlaceOrderHandler() {
-        SqsClientBuilder builder = SqsClient.builder();
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
+
+        SqsClientBuilder sqsBuilder = SqsClient.builder();
         if (endpointUrl != null && !endpointUrl.isEmpty()) {
-            builder.endpointOverride(URI.create(endpointUrl));
+            sqsBuilder.endpointOverride(URI.create(endpointUrl));
         }
-        this.sqsClient = builder.build();
+        this.sqsClient = sqsBuilder.build();
+
+        DynamoDbClientBuilder dynamoBuilder = DynamoDbClient.builder();
+        if (endpointUrl != null && !endpointUrl.isEmpty()) {
+            dynamoBuilder.endpointOverride(URI.create(endpointUrl));
+        }
+        this.productsClient = dynamoBuilder.build();
     }
 
     @Override
@@ -48,6 +62,80 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
 
             if (userId == null || items == null || items.isEmpty()) {
                 return response(400, "{\"error\":\"userId and items are required\"}");
+            }
+
+            // Phase 1: stock check (non-locking read, fast-fail)
+            List<Map<String, String>> outOfStock = new ArrayList<>();
+            for (OrderItem item : items) {
+                Map<String, AttributeValue> key = Map.of(
+                        "productID", AttributeValue.fromS(item.getProductId())
+                );
+                GetItemResponse productResponse = productsClient.getItem(GetItemRequest.builder()
+                        .tableName(productsTable)
+                        .key(key)
+                        .build());
+
+                if (!productResponse.hasItem() || productResponse.item().isEmpty()) {
+                    outOfStock.add(Map.of("productId", item.getProductId(), "reason", "not found"));
+                } else {
+                    AttributeValue stockAttr = productResponse.item().get("stock");
+                    int stock = stockAttr != null ? Integer.parseInt(stockAttr.n()) : 0;
+                    if (stock < item.getQuantity()) {
+                        outOfStock.add(Map.of("productId", item.getProductId(),
+                                "available", String.valueOf(stock),
+                                "requested", String.valueOf(item.getQuantity())));
+                    }
+                }
+            }
+
+            if (!outOfStock.isEmpty()) {
+                String errorBody = mapper.writeValueAsString(Map.of(
+                        "error", "Insufficient stock",
+                        "items", outOfStock
+                ));
+                return response(409, errorBody);
+            }
+
+            // Phase 2: conditional reservation (atomic decrement per item)
+            List<OrderItem> reserved = new ArrayList<>();
+            for (OrderItem item : items) {
+                Map<String, AttributeValue> key = Map.of(
+                        "productID", AttributeValue.fromS(item.getProductId())
+                );
+                Map<String, AttributeValue> exprValues = new HashMap<>();
+                exprValues.put(":qty", AttributeValue.fromN(String.valueOf(item.getQuantity())));
+
+                try {
+                    productsClient.updateItem(UpdateItemRequest.builder()
+                            .tableName(productsTable)
+                            .key(key)
+                            .updateExpression("SET stock = stock - :qty")
+                            .conditionExpression("stock >= :qty")
+                            .expressionAttributeValues(exprValues)
+                            .build());
+                    reserved.add(item);
+                } catch (ConditionalCheckFailedException e) {
+                    // Rollback already-reserved items
+                    for (OrderItem reservedItem : reserved) {
+                        Map<String, AttributeValue> rollbackKey = Map.of(
+                                "productID", AttributeValue.fromS(reservedItem.getProductId())
+                        );
+                        Map<String, AttributeValue> rollbackValues = Map.of(
+                                ":qty", AttributeValue.fromN(String.valueOf(reservedItem.getQuantity()))
+                        );
+                        productsClient.updateItem(UpdateItemRequest.builder()
+                                .tableName(productsTable)
+                                .key(rollbackKey)
+                                .updateExpression("SET stock = stock + :qty")
+                                .expressionAttributeValues(rollbackValues)
+                                .build());
+                    }
+                    String errorBody = mapper.writeValueAsString(Map.of(
+                            "error", "Insufficient stock",
+                            "items", List.of(Map.of("productId", item.getProductId(), "reason", "race condition"))
+                    ));
+                    return response(409, errorBody);
+                }
             }
 
             double total = items.stream()

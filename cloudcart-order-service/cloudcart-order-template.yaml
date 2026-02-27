@@ -32,6 +32,13 @@ Resources:
       QueueName: OrderPlacedQueueDev
       VisibilityTimeout: 60
 
+  ### SQS Queue for Payment Success Events ###
+  PaymentSuccessQueueDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: PaymentSuccessQueueDev
+      VisibilityTimeout: 60
+
   ### IAM Role for Order Lambdas ###
   OrderLambdaRoleDev:
     Type: AWS::IAM::Role
@@ -64,6 +71,11 @@ Resources:
                   - !Sub "${OrdersTableDev.Arn}/index/*"
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ProductsTableDev"
+              - Effect: Allow
+                Action:
                   - sqs:SendMessage
                 Resource: !GetAtt OrderPlacedQueueDev.Arn
 
@@ -84,6 +96,7 @@ Resources:
         Variables:
           ORDERS_TABLE: !Ref OrdersTableDev
           ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
+          PRODUCTS_TABLE: ProductsTableDev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   GetOrderFunctionDev:
@@ -236,6 +249,18 @@ Outputs:
     Value: !Ref OrderPlacedQueueDev
     Export:
       Name: cloudcart-order-OrderQueueUrl
+
+  PaymentSuccessQueueArn:
+    Description: "ARN of the payment success SQS queue"
+    Value: !GetAtt PaymentSuccessQueueDev.Arn
+    Export:
+      Name: cloudcart-order-PaymentSuccessQueueArn
+
+  PaymentSuccessQueueUrl:
+    Description: "URL of the payment success SQS queue"
+    Value: !Ref PaymentSuccessQueueDev
+    Export:
+      Name: cloudcart-order-PaymentSuccessQueueUrl
 
   OrdersTableName:
     Description: "DynamoDB table name for orders"

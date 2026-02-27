@@ -1,13 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: '[DEV] Payment service - Lambda triggered by SQS, updates order status in DynamoDB'
+Description: '[DEV] Shipment service - Lambda triggered by PaymentSuccessQueue, updates order status to SHIPPED'
 
 Resources:
 
-  ### IAM Role for Payment Lambda ###
-  PaymentLambdaRoleDev:
+  ### IAM Role for Shipment Lambda ###
+  ShipmentLambdaRoleDev:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: PaymentLambdaRoleDev
+      RoleName: ShipmentLambdaRoleDev
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -18,7 +18,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: PaymentSQSDynamoAccess
+        - PolicyName: ShipmentSQSDynamoAccess
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -27,40 +27,35 @@ Resources:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
-                Resource: !ImportValue cloudcart-order-OrderQueueArn
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
                 Resource: !ImportValue cloudcart-order-PaymentSuccessQueueArn
               - Effect: Allow
                 Action:
                   - dynamodb:UpdateItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
 
-  ### Payment Lambda Function ###
-  ProcessPaymentFunctionDev:
+  ### Shipment Lambda Function ###
+  ProcessShipmentFunctionDev:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: ProcessPaymentFunctionDev
+      FunctionName: ProcessShipmentFunctionDev
       Runtime: java21
-      Handler: com.cloudcart.payment.handler.ProcessPaymentHandler::handleRequest
-      Role: !GetAtt PaymentLambdaRoleDev.Arn
+      Handler: com.cloudcart.shipment.handler.ProcessShipmentHandler::handleRequest
+      Role: !GetAtt ShipmentLambdaRoleDev.Arn
       Code:
         S3Bucket: sid-mysourcecode
-        S3Key: payment-service-1.0.0.jar
+        S3Key: shipment-service-1.0.0.jar
       Timeout: 30
       MemorySize: 256
       Environment:
         Variables:
           ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
-          PAYMENT_SUCCESS_QUEUE_URL: !ImportValue cloudcart-order-PaymentSuccessQueueUrl
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   ### SQS Event Source Mapping ###
-  OrderQueueEventSourceMapping:
+  PaymentSuccessQueueEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping
     Properties:
-      EventSourceArn: !ImportValue cloudcart-order-OrderQueueArn
-      FunctionName: !GetAtt ProcessPaymentFunctionDev.Arn
+      EventSourceArn: !ImportValue cloudcart-order-PaymentSuccessQueueArn
+      FunctionName: !GetAtt ProcessShipmentFunctionDev.Arn
       BatchSize: 5
       Enabled: true

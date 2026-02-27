@@ -7,6 +7,8 @@ public class Order {
     private double totalAmount;
     private String status;
     private String createdAt;
+    private String trackingId;
+    private String shippedAt;
 
     public Order() {}
 
@@ -27,4 +29,10 @@ public class Order {
 
     public String getCreatedAt() { return createdAt; }
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+
+    public String getTrackingId() { return trackingId; }
+    public void setTrackingId(String trackingId) { this.trackingId = trackingId; }
+
+    public String getShippedAt() { return shippedAt; }
+    public void setShippedAt(String shippedAt) { this.shippedAt = shippedAt; }
 }

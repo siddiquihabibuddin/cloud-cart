@@ -91,6 +91,12 @@ public class OrderRepository {
         order.setTotalAmount(Double.parseDouble(row.get("totalAmount").n()));
         order.setStatus(row.get("status").s());
         order.setCreatedAt(row.get("createdAt").s());
+        if (row.containsKey("trackingId")) {
+            order.setTrackingId(row.get("trackingId").s());
+        }
+        if (row.containsKey("shippedAt")) {
+            order.setShippedAt(row.get("shippedAt").s());
+        }
         return order;
     }
 }

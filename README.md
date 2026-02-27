@@ -17,13 +17,21 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 
     ┌─────────────────────────────────────────────────┐
     │                  order-service                  │
-    │   POST /orders → DynamoDB (PENDING) → SQS       │
+    │  stock check → reserve inventory → DynamoDB     │
+    │  (PENDING) → OrderPlacedEvent → SQS             │
     └──────────────────────────┬──────────────────────┘
-                               │ OrderPlacedEvent
+                               │ OrderPlacedQueueDev
                     ┌──────────▼──────────┐
                     │   payment-service   │
-                    │  SQS trigger → 80% PAID / 20% FAILED
-                    │  → UpdateItem DynamoDB             │
+                    │  80% PAID / 20% FAILED           │
+                    │  → UpdateItem DynamoDB            │
+                    │  If PAID → PaymentSuccessEvent   │
+                    └──────────┬──────────┘
+                               │ PaymentSuccessQueueDev
+                    ┌──────────▼──────────┐
+                    │  shipment-service   │
+                    │  generate trackingId             │
+                    │  → UpdateItem SHIPPED            │
                     └─────────────────────┘
 ```
 
@@ -34,8 +42,9 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 | `cloudcart-product-catalog-java` | Java 21 Lambda | REST API | `ProductsTableDev` |
 | `cloudcart-cart-service` | Java 21 Lambda | REST API | `CartTableDev` |
 | `cloudcart-order-service` | Java 21 Lambda | REST API | `OrdersTableDev` + SQS |
-| `cloudcart-payment-service` | Java 21 Lambda | SQS | `OrdersTableDev` |
-| `cloudcart-frontend` | Next.js 16 | — | — |
+| `cloudcart-payment-service` | Java 21 Lambda | SQS (`OrderPlacedQueueDev`) | `OrdersTableDev` |
+| `cloudcart-shipment-service` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev` |
+| `cloudcart-frontend` | Next.js | — | — |
 
 ## API Routes
 
@@ -58,17 +67,23 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 ### Orders
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/orders` | Place order (→ SQS) |
-| `GET` | `/orders/{orderId}` | Get order status |
+| `POST` | `/orders` | Place order — reserves stock, returns 409 if insufficient |
+| `GET` | `/orders/{orderId}` | Get order (includes `trackingId` and `shippedAt` once shipped) |
 | `GET` | `/orders?userId=X` | List user's orders |
 
 ## Order Flow
 
 1. Customer adds items to cart and navigates to `/checkout`
-2. "Place Order" sends `POST /orders` → order saved as **PENDING**
-3. `OrderPlacedEvent` published to SQS `OrderPlacedQueueDev`
-4. Payment Lambda consumes the event → **80% PAID / 20% FAILED**
-5. Checkout page polls `GET /orders/{id}` every 2s and displays the final status
+2. "Place Order" sends `POST /orders`
+   - Stock is checked per item (`GetItem` on `ProductsTableDev`)
+   - If any item is out of stock → **409** `{"error":"Insufficient stock","items":[...]}`
+   - Stock is atomically decremented via conditional `UpdateItem` (race-condition safe)
+   - Order saved as **PENDING**, `OrderPlacedEvent` published to `OrderPlacedQueueDev`
+3. Payment Lambda consumes the event → **80% PAID / 20% FAILED**
+   - If PAID → publishes `PaymentSuccessEvent` to `PaymentSuccessQueueDev`
+4. Shipment Lambda consumes the payment event → generates `TRK-XXXXXXXX` tracking ID
+   - Order updated to **SHIPPED** with `trackingId` and `shippedAt`
+5. Checkout page polls `GET /orders/{id}` every 2s — status progresses PENDING → PAID → SHIPPED
 
 ## Prerequisites
 
@@ -97,7 +112,8 @@ docker run -d \
 bash deploy-localstack.sh
 ```
 
-This builds all four JARs, uploads them to S3, and deploys the CloudFormation stacks in dependency order (order stack before payment stack).
+Builds all five JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
+`cart` + `products` → `order` → `payment` → `shipment`
 
 ### 3. Configure the frontend
 
@@ -143,6 +159,6 @@ awslocal lambda update-function-code \
 ## Tech Stack
 
 - **Backend**: AWS Lambda (Java 21), DynamoDB, SQS, API Gateway (REST v1)
-- **Frontend**: Next.js 16, TypeScript, Tailwind CSS, Axios
+- **Frontend**: Next.js, TypeScript, Tailwind CSS, Axios
 - **Infrastructure**: AWS CloudFormation, LocalStack Pro
 - **Build**: Maven (Shade plugin for fat JARs)
