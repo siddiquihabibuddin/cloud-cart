@@ -189,15 +189,21 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             order.setStatus("PENDING");
             order.setCreatedAt(Instant.now().toString());
 
-            REPOSITORY.saveOrder(order);
-
-            // --- Publish event ---
+            // --- Publish event before persisting the order ---
+            // SQS is published first so that if saveOrder fails, the event is
+            // already in the queue and the payment Lambda retries until the order
+            // record appears (or the message goes to the DLQ after 3 attempts).
+            // Payment Lambda guards against processing a not-yet-saved order via
+            // a conditional update on attribute_exists(orderId).
             OrderPlacedEvent event = new OrderPlacedEvent(orderId, userId, items, total);
             String eventJson = MAPPER.writeValueAsString(event);
             SQS_CLIENT.sendMessage(SendMessageRequest.builder()
                     .queueUrl(QUEUE_URL)
                     .messageBody(eventJson)
                     .build());
+
+            // --- Persist the order ---
+            REPOSITORY.saveOrder(order);
 
             logger.info("Order placed", Map.of("orderId", orderId, "userId", userId));
             METRICS.count("OrderPlaced");

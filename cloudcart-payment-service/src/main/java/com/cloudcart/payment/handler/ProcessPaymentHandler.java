@@ -12,6 +12,9 @@ import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
@@ -71,13 +74,42 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
 
                 String status = Math.random() < 0.8 ? "PAID" : "FAILED";
 
-                DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
-                        .tableName(ORDERS_TABLE)
-                        .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
-                        .updateExpression("SET #s = :status")
-                        .expressionAttributeNames(Map.of("#s", "status"))
-                        .expressionAttributeValues(Map.of(":status", AttributeValue.fromS(status)))
-                        .build());
+                // Condition: order must exist AND still be PENDING.
+                // - attribute_not_exists / not-PENDING → ConditionalCheckFailedException
+                //   → inspect order: if missing, add to failedItems so SQS retries
+                //     (order-service publishes to SQS before saveOrder, so the record
+                //     may not be written yet on a first attempt)
+                //   → if present but already processed, skip silently (idempotent)
+                try {
+                    DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                            .tableName(ORDERS_TABLE)
+                            .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
+                            .updateExpression("SET #s = :status")
+                            .conditionExpression("attribute_exists(orderId) AND #s = :pending")
+                            .expressionAttributeNames(Map.of("#s", "status"))
+                            .expressionAttributeValues(Map.of(
+                                    ":status", AttributeValue.fromS(status),
+                                    ":pending", AttributeValue.fromS("PENDING")
+                            ))
+                            .build());
+                } catch (ConditionalCheckFailedException condEx) {
+                    GetItemResponse check = DYNAMO_CLIENT.getItem(GetItemRequest.builder()
+                            .tableName(ORDERS_TABLE)
+                            .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
+                            .build());
+                    if (!check.hasItem() || check.item().isEmpty()) {
+                        // Order not persisted yet — retry via SQS
+                        logger.info("Order not found yet, deferring payment",
+                                Map.of("orderId", event.getOrderId()));
+                        if (messageId != null) failedItems.add(Map.of("itemIdentifier", messageId));
+                    } else {
+                        // Order exists but not PENDING — already processed, skip
+                        logger.info("Payment already processed, skipping",
+                                Map.of("orderId", event.getOrderId(),
+                                       "currentStatus", check.item().get("status").s()));
+                    }
+                    continue;
+                }
 
                 logger.info("Payment processed", Map.of(
                         "orderId", event.getOrderId(),
