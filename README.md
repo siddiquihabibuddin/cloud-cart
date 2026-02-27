@@ -8,12 +8,18 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 ┌─────────────────────────────────────────────────────────┐
 │                      Next.js Frontend                   │
 │         Products → Cart → Checkout → Order Status       │
-└────────────┬──────────────────────────┬─────────────────┘
-             │                          │
-    ┌────────▼────────┐      ┌──────────▼──────────┐
-    │  product-catalog│      │    cart-service      │
-    │  Lambda + DDB   │      │    Lambda + DDB      │
-    └─────────────────┘      └─────────────────────┘
+└───────────────────────────┬─────────────────────────────┘
+                            │ /api-products, /api-cart, /api-orders
+                ┌───────────▼───────────┐
+                │   Unified API Gateway  │
+                │   (UnifiedApiDev)      │
+                └──┬──────────┬─────────┘
+                   │          │           │
+    ┌──────────────▼──┐  ┌────▼────┐  ┌──▼──────────────┐
+    │  product-catalog│  │  cart   │  │  order-service   │
+    │  Lambda + DDB   │  │  Lambda │  │  Lambda + DDB    │
+    └─────────────────┘  │  + DDB  │  └─────────────────┘
+                         └─────────┘
 
     ┌─────────────────────────────────────────────────┐
     │                  order-service                  │
@@ -144,21 +150,21 @@ docker run -d \
 bash deploy-localstack.sh
 ```
 
-Builds all five JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
-`cart` + `products` → `order` → `payment` → `shipment`
+Builds all five service JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
+`cart` + `products` → `order` → `payment` → `shipment` → `gateway`
 
 ### 3. Configure the frontend
 
-After deploy, grab the API IDs from the stack outputs and add them to `cloudcart-frontend/.env.local`:
+After deploy, grab the `UnifiedApiInternalUrl` from the gateway stack output and add it to `cloudcart-frontend/.env.local`:
 
 ```env
 NEXT_PUBLIC_PRODUCTS_API=/api-products
 NEXT_PUBLIC_CART_API=/api-cart
 NEXT_PUBLIC_ORDER_API=/api-orders
-NEXT_PUBLIC_PRODUCTS_API_INTERNAL=http://localhost:4566/restapis/<products-api-id>/dev/_user_request_
-NEXT_PUBLIC_CART_API_INTERNAL=http://localhost:4566/restapis/<cart-api-id>/dev/_user_request_
-NEXT_PUBLIC_ORDER_API_INTERNAL=http://localhost:4566/restapis/<order-api-id>/dev/_user_request_
+NEXT_PUBLIC_UNIFIED_API_INTERNAL=http://localhost:4566/restapis/<gateway-api-id>/dev/_user_request_
 ```
+
+All three frontend rewrites (`/api-products`, `/api-cart`, `/api-orders`) route through the single unified gateway — only one API ID is needed.
 
 ### 4. Start the frontend
 
@@ -172,9 +178,10 @@ Open **http://localhost:3000**
 
 ### 5. Seed products (optional)
 
+Products are seeded automatically at the end of `deploy-localstack.sh`. To re-run manually:
+
 ```bash
-PRODUCTS_API=http://localhost:4566/restapis/<products-api-id>/dev/_user_request_ \
-  bash seed-products.sh
+bash seed-products.sh
 ```
 
 ## Force-refreshing Lambda code
