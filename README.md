@@ -17,9 +17,10 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 
     ┌─────────────────────────────────────────────────┐
     │                  order-service                  │
-    │  validate → idempotency check → TransactWrite   │
-    │  (atomic stock reservation) → DynamoDB PENDING  │
-    │  → OrderPlacedEvent → SQS                       │
+    │  validate → idempotency check                   │
+    │  → PATCH /products/{id}/stock (reserve) × N    │
+    │    (rollback via release on any failure)        │
+    │  → DynamoDB PENDING → OrderPlacedEvent → SQS   │
     └──────────────────────────┬──────────────────────┘
                                │ OrderPlacedQueueDev (DLQ: OrderPlacedDLQDev)
                     ┌──────────▼──────────┐
@@ -55,7 +56,7 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 | `GET` | `/products?limit=N&lastKey=X` | List products (paginated, limit capped 1–100) |
 | `POST` | `/products` | Create product |
 | `GET` | `/products/{id}` | Get product |
-| `PATCH` | `/products/{id}/stock` | Update stock |
+| `PATCH` | `/products/{id}/stock` | Update stock — body: `{"stock":N}` (absolute), `{"reserve":N}` (conditional decrement, 409 if insufficient), or `{"release":N}` (increment) |
 
 ### Cart
 | Method | Path | Description |
@@ -82,7 +83,7 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 2. "Place Order" sends `POST /orders` with `x-api-key` header
    - Input is validated (userId required, quantity ≥ 1, price ≥ 0)
    - Idempotency key is checked against `IdempotencyTableDev` (24h TTL)
-   - Stock is atomically decremented via a single `TransactWriteItems` call across all items
+   - Stock is reserved via sequential `PATCH /products/{id}/stock {"reserve":N}` calls to the product catalog API; on any 409 or error, already-reserved items are released before returning the error
    - If any item is out of stock → **409** `{"error":"Insufficient stock","items":[...]}`
    - Order saved as **PENDING**, `OrderPlacedEvent` published to `OrderPlacedQueueDev`
    - Successful response is cached in `IdempotencyTableDev`
@@ -99,7 +100,7 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 | Feature | Details |
 |---|---|
 | **Idempotency** | `POST /orders` deduplicates on `Idempotency-Key` header; results cached 24h in DynamoDB |
-| **Atomic stock reservation** | Single `TransactWriteItems` call — no partial updates or rollback logic |
+| **Stock reservation via API** | Order service calls `PATCH /products/{id}/stock {"reserve":N}` on the product catalog API; on failure a compensating `{"release":N}` call rolls back already-reserved items. Services own their own data — no cross-service DynamoDB access. |
 | **Dead Letter Queues** | `OrderPlacedDLQDev` and `PaymentSuccessDLQDev`; messages moved after 3 failed delivery attempts |
 | **Batch item failures** | Payment and shipment Lambdas return `batchItemFailures` so only failed records are retried |
 | **API key auth** | All order endpoints require `x-api-key: cloudcart-dev-key-2024` |
