@@ -4,6 +4,7 @@ import com.cloudcart.product.model.Product;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
@@ -121,6 +122,31 @@ public Product getProductById(String productId) {
                 .build();
 
         dynamoDbClient.updateItem(request);
+    }
+
+    // Returns true if reservation succeeded, false if insufficient stock.
+    public boolean reserveStock(String productId, int qty) {
+        try {
+            dynamoDbClient.updateItem(UpdateItemRequest.builder()
+                    .tableName(tableName)
+                    .key(Map.of("productID", AttributeValue.fromS(productId)))
+                    .updateExpression("SET stock = stock - :qty")
+                    .conditionExpression("stock >= :qty")
+                    .expressionAttributeValues(Map.of(":qty", AttributeValue.fromN(String.valueOf(qty))))
+                    .build());
+            return true;
+        } catch (ConditionalCheckFailedException e) {
+            return false;
+        }
+    }
+
+    public void releaseStock(String productId, int qty) {
+        dynamoDbClient.updateItem(UpdateItemRequest.builder()
+                .tableName(tableName)
+                .key(Map.of("productID", AttributeValue.fromS(productId)))
+                .updateExpression("SET stock = stock + :qty")
+                .expressionAttributeValues(Map.of(":qty", AttributeValue.fromN(String.valueOf(qty))))
+                .build());
     }
 
 }

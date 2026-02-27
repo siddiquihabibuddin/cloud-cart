@@ -14,12 +14,20 @@ import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
-import software.amazon.awssdk.services.dynamodb.model.*;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,8 +42,9 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Orders");
     private static final SqsClient SQS_CLIENT;
     private static final DynamoDbClient DYNAMO_CLIENT;
+    private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
     private static final String QUEUE_URL = System.getenv("ORDER_QUEUE_URL");
-    private static final String PRODUCTS_TABLE = System.getenv("PRODUCTS_TABLE");
+    private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
     private static final String IDEMPOTENCY_TABLE = System.getenv("IDEMPOTENCY_TABLE");
 
     static {
@@ -136,41 +145,32 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
                 }
             }
 
-            // --- Atomic stock reservation via TransactWriteItems (P1.1) ---
-            List<TransactWriteItem> transactItems = new ArrayList<>();
+            // --- Stock reservation via product catalog API ---
+            // Reserve each item sequentially; on any failure, release already-reserved items
+            // (compensating rollback) before returning an error.
+            List<OrderItem> reserved = new ArrayList<>();
             for (OrderItem item : items) {
-                transactItems.add(TransactWriteItem.builder()
-                        .update(Update.builder()
-                                .tableName(PRODUCTS_TABLE)
-                                .key(Map.of("productID", AttributeValue.fromS(item.getProductId())))
-                                .updateExpression("SET stock = stock - :qty")
-                                .conditionExpression("stock >= :qty")
-                                .expressionAttributeValues(Map.of(
-                                        ":qty", AttributeValue.fromN(String.valueOf(item.getQuantity()))
-                                ))
-                                .build())
-                        .build());
-            }
-
-            try {
-                DYNAMO_CLIENT.transactWriteItems(TransactWriteItemsRequest.builder()
-                        .transactItems(transactItems)
-                        .build());
-            } catch (TransactionCanceledException e) {
-                List<Map<String, String>> outOfStock = new ArrayList<>();
-                List<CancellationReason> reasons = e.cancellationReasons();
-                for (int i = 0; i < reasons.size() && i < items.size(); i++) {
-                    if ("ConditionalCheckFailed".equals(reasons.get(i).code())) {
-                        outOfStock.add(Map.of(
-                                "productId", items.get(i).getProductId(),
-                                "reason", "insufficient stock"
-                        ));
+                int statusCode = callReserveStock(item.getProductId(), item.getQuantity(), logger);
+                if (statusCode == 409) {
+                    for (OrderItem r : reserved) {
+                        callReleaseStock(r.getProductId(), r.getQuantity(), logger);
                     }
+                    String errorBody = MAPPER.writeValueAsString(Map.of(
+                            "error", "Insufficient stock",
+                            "items", List.of(Map.of(
+                                    "productId", item.getProductId(),
+                                    "reason", "insufficient stock"))));
+                    METRICS.count("StockInsufficient");
+                    return response(409, errorBody);
+                } else if (statusCode != 200) {
+                    for (OrderItem r : reserved) {
+                        callReleaseStock(r.getProductId(), r.getQuantity(), logger);
+                    }
+                    logger.error("Unexpected response from product API", Map.of(
+                            "productId", item.getProductId(), "statusCode", String.valueOf(statusCode)));
+                    return response(502, "{\"error\":\"Failed to reserve stock\"}");
                 }
-                String errorBody = MAPPER.writeValueAsString(Map.of(
-                        "error", "Insufficient stock", "items", outOfStock));
-                METRICS.count("StockInsufficient");
-                return response(409, errorBody);
+                reserved.add(item);
             }
 
             // --- Save order ---
@@ -236,6 +236,40 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             logger.error("Order placement failed", Map.of("error", String.valueOf(e.getMessage())));
             METRICS.count("OrderFailed");
             return response(500, "{\"error\":\"Failed to place order\"}");
+        }
+    }
+
+    private int callReserveStock(String productId, int qty, JsonLogger logger) {
+        try {
+            String body = MAPPER.writeValueAsString(Map.of("reserve", qty));
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(PRODUCTS_API_URL + "/products/" + productId + "/stock"))
+                    .header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            return resp.statusCode();
+        } catch (Exception e) {
+            logger.error("Failed to call reserve stock", Map.of(
+                    "productId", productId, "error", String.valueOf(e.getMessage())));
+            return 500;
+        }
+    }
+
+    private int callReleaseStock(String productId, int qty, JsonLogger logger) {
+        try {
+            String body = MAPPER.writeValueAsString(Map.of("release", qty));
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(PRODUCTS_API_URL + "/products/" + productId + "/stock"))
+                    .header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            return resp.statusCode();
+        } catch (Exception e) {
+            logger.error("Failed to call release stock", Map.of(
+                    "productId", productId, "error", String.valueOf(e.getMessage())));
+            return 500;
         }
     }
 

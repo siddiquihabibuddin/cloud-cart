@@ -140,11 +140,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
-                  - dynamodb:UpdateItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ProductsTableDev"
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
                   - dynamodb:PutItem
                 Resource: !GetAtt IdempotencyTableDev.Arn
               - Effect: Allow
@@ -169,7 +164,7 @@ Resources:
         Variables:
           ORDERS_TABLE: !Ref OrdersTableDev
           ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
-          PRODUCTS_TABLE: ProductsTableDev
+          PRODUCTS_API_URL: !ImportValue cloudcart-products-ProductApiInternalUrl
           IDEMPOTENCY_TABLE: !Ref IdempotencyTableDev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 

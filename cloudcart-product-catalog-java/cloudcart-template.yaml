@@ -253,3 +253,9 @@ Outputs:
   DevTableName:
     Description: "Name of the DynamoDB table for dev"
     Value: !Ref ProductsTableDev
+
+  ProductApiInternalUrl:
+    Description: "Internal LocalStack URL for product API (used by order service)"
+    Value: !Sub "http://host.docker.internal:4566/restapis/${ProductApiDev}/dev/_user_request_"
+    Export:
+      Name: cloudcart-products-ProductApiInternalUrl
