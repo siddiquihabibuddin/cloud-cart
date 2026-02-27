@@ -98,23 +98,41 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
                         Map.of("error", "Validation failed", "details", validationErrors)));
             }
 
-            // --- Idempotency check ---
+            // --- Idempotency: atomically claim the key before doing any work ---
+            // Uses conditional PutItem (attribute_not_exists) so only one concurrent
+            // request can win the slot — eliminates the GetItem→PutItem TOCTOU race.
             String idempotencyKey = extractHeader(headers, "Idempotency-Key");
             if (idempotencyKey != null && IDEMPOTENCY_TABLE != null) {
-                GetItemResponse idempResponse = DYNAMO_CLIENT.getItem(GetItemRequest.builder()
-                        .tableName(IDEMPOTENCY_TABLE)
-                        .key(Map.of("idempotencyKey", AttributeValue.fromS(idempotencyKey)))
-                        .build());
-                if (idempResponse.hasItem() && !idempResponse.item().isEmpty()) {
-                    Map<String, AttributeValue> idempItem = idempResponse.item();
-                    long expiresAt = Long.parseLong(idempItem.get("expiresAt").n());
-                    if (expiresAt > Instant.now().getEpochSecond()) {
-                        int cachedStatus = Integer.parseInt(idempItem.get("statusCode").n());
-                        String cachedBody = idempItem.get("responseBody").s();
-                        logger.info("Idempotent response returned",
-                                Map.of("idempotencyKey", idempotencyKey));
-                        return response(cachedStatus, cachedBody);
+                Map<String, AttributeValue> claimItem = new HashMap<>();
+                claimItem.put("idempotencyKey", AttributeValue.fromS(idempotencyKey));
+                claimItem.put("status", AttributeValue.fromS("IN_PROGRESS"));
+                claimItem.put("expiresAt", AttributeValue.fromN(
+                        String.valueOf(Instant.now().getEpochSecond() + 86400)));
+                try {
+                    DYNAMO_CLIENT.putItem(PutItemRequest.builder()
+                            .tableName(IDEMPOTENCY_TABLE)
+                            .item(claimItem)
+                            .conditionExpression("attribute_not_exists(idempotencyKey)")
+                            .build());
+                    // Slot claimed — fall through to process the order
+                } catch (ConditionalCheckFailedException e) {
+                    // Key already exists; fetch the stored outcome
+                    GetItemResponse existing = DYNAMO_CLIENT.getItem(GetItemRequest.builder()
+                            .tableName(IDEMPOTENCY_TABLE)
+                            .key(Map.of("idempotencyKey", AttributeValue.fromS(idempotencyKey)))
+                            .build());
+                    if (existing.hasItem() && !existing.item().isEmpty()) {
+                        Map<String, AttributeValue> stored = existing.item();
+                        if ("COMPLETED".equals(stored.get("status").s())) {
+                            int cachedStatus = Integer.parseInt(stored.get("statusCode").n());
+                            String cachedBody = stored.get("responseBody").s();
+                            logger.info("Idempotent response returned",
+                                    Map.of("idempotencyKey", idempotencyKey));
+                            return response(cachedStatus, cachedBody);
+                        }
                     }
+                    // IN_PROGRESS means a concurrent request is still running
+                    return response(409, "{\"error\":\"A request with this Idempotency-Key is already in progress\"}");
                 }
             }
 
@@ -186,18 +204,19 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
 
             String responseBody = MAPPER.writeValueAsString(Map.of("orderId", orderId));
 
-            // --- Store idempotency record ---
+            // --- Mark idempotency record COMPLETED with the real response ---
             if (idempotencyKey != null && IDEMPOTENCY_TABLE != null) {
-                Map<String, AttributeValue> idempItem = new HashMap<>();
-                idempItem.put("idempotencyKey", AttributeValue.fromS(idempotencyKey));
-                idempItem.put("orderId", AttributeValue.fromS(orderId));
-                idempItem.put("statusCode", AttributeValue.fromN("201"));
-                idempItem.put("responseBody", AttributeValue.fromS(responseBody));
-                idempItem.put("expiresAt", AttributeValue.fromN(
-                        String.valueOf(Instant.now().getEpochSecond() + 86400)));
-                DYNAMO_CLIENT.putItem(PutItemRequest.builder()
+                DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
                         .tableName(IDEMPOTENCY_TABLE)
-                        .item(idempItem)
+                        .key(Map.of("idempotencyKey", AttributeValue.fromS(idempotencyKey)))
+                        .updateExpression("SET #st = :completed, statusCode = :sc, responseBody = :rb, orderId = :oid")
+                        .expressionAttributeNames(Map.of("#st", "status"))
+                        .expressionAttributeValues(Map.of(
+                                ":completed", AttributeValue.fromS("COMPLETED"),
+                                ":sc", AttributeValue.fromN("201"),
+                                ":rb", AttributeValue.fromS(responseBody),
+                                ":oid", AttributeValue.fromS(orderId)
+                        ))
                         .build());
             }
 
