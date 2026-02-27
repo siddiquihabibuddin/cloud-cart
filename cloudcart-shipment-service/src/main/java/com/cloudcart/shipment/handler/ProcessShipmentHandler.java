@@ -3,7 +3,11 @@ package com.cloudcart.shipment.handler;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.cloudcart.shipment.model.PaymentSuccessEvent;
+import com.cloudcart.shipment.util.JsonLogger;
+import com.cloudcart.shipment.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
@@ -11,45 +15,56 @@ import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-public class ProcessShipmentHandler implements RequestHandler<Map<String, Object>, Void> {
+public class ProcessShipmentHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final DynamoDbClient dynamoDbClient;
-    private final String ordersTable = System.getenv("ORDERS_TABLE");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Shipments");
+    private static final DynamoDbClient DYNAMO_CLIENT;
+    private static final String ORDERS_TABLE = System.getenv("ORDERS_TABLE");
 
-    public ProcessShipmentHandler() {
-        DynamoDbClientBuilder builder = DynamoDbClient.builder();
+    static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
+        ClientOverrideConfiguration overrideConfig = ClientOverrideConfiguration.builder()
+                .retryPolicy(RetryPolicy.builder().numRetries(3).build())
+                .build();
+
+        DynamoDbClientBuilder dynamoBuilder = DynamoDbClient.builder().overrideConfiguration(overrideConfig);
         if (endpointUrl != null && !endpointUrl.isEmpty()) {
-            builder.endpointOverride(URI.create(endpointUrl));
+            dynamoBuilder.endpointOverride(URI.create(endpointUrl));
         }
-        this.dynamoDbClient = builder.build();
+        DYNAMO_CLIENT = dynamoBuilder.build();
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public Void handleRequest(Map<String, Object> input, Context context) {
+    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+        JsonLogger logger = new JsonLogger("shipment-service", null);
+        List<Map<String, String>> failedItems = new ArrayList<>();
+
         List<Map<String, Object>> records = (List<Map<String, Object>>) input.get("Records");
         if (records == null) {
-            context.getLogger().log("No records in SQS event");
-            return null;
+            logger.info("No records in SQS event", null);
+            return buildBatchResponse(failedItems);
         }
 
         for (Map<String, Object> record : records) {
+            String messageId = (String) record.get("messageId");
             try {
                 String body = (String) record.get("body");
-                PaymentSuccessEvent event = mapper.readValue(body, PaymentSuccessEvent.class);
+                PaymentSuccessEvent event = MAPPER.readValue(body, PaymentSuccessEvent.class);
 
                 String trackingId = "TRK-" + UUID.randomUUID().toString()
                         .replace("-", "").substring(0, 8).toUpperCase();
                 String shippedAt = Instant.now().toString();
 
-                dynamoDbClient.updateItem(UpdateItemRequest.builder()
-                        .tableName(ordersTable)
+                DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                        .tableName(ORDERS_TABLE)
                         .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
                         .updateExpression("SET #s = :status, trackingId = :tid, shippedAt = :ts")
                         .expressionAttributeNames(Map.of("#s", "status"))
@@ -60,14 +75,27 @@ public class ProcessShipmentHandler implements RequestHandler<Map<String, Object
                         ))
                         .build());
 
-                context.getLogger().log("Shipment initiated for order " + event.getOrderId()
-                        + ", tracking: " + trackingId);
+                logger.info("Shipment initiated",
+                        Map.of("orderId", event.getOrderId(), "trackingId", trackingId));
+                METRICS.count("ShipmentInitiated");
 
             } catch (Exception e) {
-                context.getLogger().log("Error processing shipment record: " + e.getMessage());
+                logger.error("Error processing shipment record", Map.of(
+                        "messageId", messageId != null ? messageId : "unknown",
+                        "error", String.valueOf(e.getMessage())));
+                METRICS.count("ShipmentError");
+                if (messageId != null) {
+                    failedItems.add(Map.of("itemIdentifier", messageId));
+                }
             }
         }
 
-        return null;
+        return buildBatchResponse(failedItems);
+    }
+
+    private Map<String, Object> buildBatchResponse(List<Map<String, String>> failedItems) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("batchItemFailures", failedItems);
+        return response;
     }
 }

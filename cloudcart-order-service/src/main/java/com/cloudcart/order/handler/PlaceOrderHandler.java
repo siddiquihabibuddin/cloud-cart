@@ -6,8 +6,12 @@ import com.cloudcart.order.model.Order;
 import com.cloudcart.order.model.OrderItem;
 import com.cloudcart.order.model.OrderPlacedEvent;
 import com.cloudcart.order.repository.OrderRepository;
+import com.cloudcart.order.util.JsonLogger;
+import com.cloudcart.order.util.MetricsEmitter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.*;
@@ -25,125 +29,139 @@ import java.util.UUID;
 
 public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final OrderRepository repository = new OrderRepository();
-    private final SqsClient sqsClient;
-    private final DynamoDbClient productsClient;
-    private final String queueUrl = System.getenv("ORDER_QUEUE_URL");
-    private final String productsTable = System.getenv("PRODUCTS_TABLE");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final OrderRepository REPOSITORY = new OrderRepository();
+    private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Orders");
+    private static final SqsClient SQS_CLIENT;
+    private static final DynamoDbClient DYNAMO_CLIENT;
+    private static final String QUEUE_URL = System.getenv("ORDER_QUEUE_URL");
+    private static final String PRODUCTS_TABLE = System.getenv("PRODUCTS_TABLE");
+    private static final String IDEMPOTENCY_TABLE = System.getenv("IDEMPOTENCY_TABLE");
 
-    public PlaceOrderHandler() {
+    static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
+        ClientOverrideConfiguration overrideConfig = ClientOverrideConfiguration.builder()
+                .retryPolicy(RetryPolicy.builder().numRetries(3).build())
+                .build();
 
-        SqsClientBuilder sqsBuilder = SqsClient.builder();
+        SqsClientBuilder sqsBuilder = SqsClient.builder().overrideConfiguration(overrideConfig);
         if (endpointUrl != null && !endpointUrl.isEmpty()) {
             sqsBuilder.endpointOverride(URI.create(endpointUrl));
         }
-        this.sqsClient = sqsBuilder.build();
+        SQS_CLIENT = sqsBuilder.build();
 
-        DynamoDbClientBuilder dynamoBuilder = DynamoDbClient.builder();
+        DynamoDbClientBuilder dynamoBuilder = DynamoDbClient.builder().overrideConfiguration(overrideConfig);
         if (endpointUrl != null && !endpointUrl.isEmpty()) {
             dynamoBuilder.endpointOverride(URI.create(endpointUrl));
         }
-        this.productsClient = dynamoBuilder.build();
+        DYNAMO_CLIENT = dynamoBuilder.build();
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+        Map<String, Object> headers = (Map<String, Object>) input.get("headers");
+        JsonLogger logger = JsonLogger.fromHeaders("order-service", headers);
+
         try {
+            // --- Input parsing ---
             String body = (String) input.get("body");
-            Map<String, Object> requestBody = mapper.readValue(body, new TypeReference<>() {});
+            Map<String, Object> requestBody = MAPPER.readValue(body, new TypeReference<>() {});
 
             String userId = (String) requestBody.get("userId");
-            List<OrderItem> items = mapper.convertValue(
+            List<OrderItem> items = MAPPER.convertValue(
                     requestBody.get("items"),
                     new TypeReference<List<OrderItem>>() {}
             );
 
-            if (userId == null || items == null || items.isEmpty()) {
-                return response(400, "{\"error\":\"userId and items are required\"}");
+            // --- Input validation ---
+            if (userId == null || userId.isBlank()) {
+                return response(400, "{\"error\":\"userId is required\"}");
+            }
+            if (items == null || items.isEmpty()) {
+                return response(400, "{\"error\":\"items are required\"}");
+            }
+            List<String> validationErrors = new ArrayList<>();
+            for (OrderItem item : items) {
+                if (item.getProductId() == null || item.getProductId().isBlank()) {
+                    validationErrors.add("productId is required for each item");
+                }
+                if (item.getQuantity() < 1) {
+                    validationErrors.add("quantity must be >= 1 for productId: " + item.getProductId());
+                }
+                if (item.getPrice() < 0) {
+                    validationErrors.add("price must be >= 0 for productId: " + item.getProductId());
+                }
+            }
+            if (!validationErrors.isEmpty()) {
+                return response(400, MAPPER.writeValueAsString(
+                        Map.of("error", "Validation failed", "details", validationErrors)));
             }
 
-            // Phase 1: stock check (non-locking read, fast-fail)
-            List<Map<String, String>> outOfStock = new ArrayList<>();
-            for (OrderItem item : items) {
-                Map<String, AttributeValue> key = Map.of(
-                        "productID", AttributeValue.fromS(item.getProductId())
-                );
-                GetItemResponse productResponse = productsClient.getItem(GetItemRequest.builder()
-                        .tableName(productsTable)
-                        .key(key)
+            // --- Idempotency check ---
+            String idempotencyKey = extractHeader(headers, "Idempotency-Key");
+            if (idempotencyKey != null && IDEMPOTENCY_TABLE != null) {
+                GetItemResponse idempResponse = DYNAMO_CLIENT.getItem(GetItemRequest.builder()
+                        .tableName(IDEMPOTENCY_TABLE)
+                        .key(Map.of("idempotencyKey", AttributeValue.fromS(idempotencyKey)))
                         .build());
-
-                if (!productResponse.hasItem() || productResponse.item().isEmpty()) {
-                    outOfStock.add(Map.of("productId", item.getProductId(), "reason", "not found"));
-                } else {
-                    AttributeValue stockAttr = productResponse.item().get("stock");
-                    int stock = stockAttr != null ? Integer.parseInt(stockAttr.n()) : 0;
-                    if (stock < item.getQuantity()) {
-                        outOfStock.add(Map.of("productId", item.getProductId(),
-                                "available", String.valueOf(stock),
-                                "requested", String.valueOf(item.getQuantity())));
+                if (idempResponse.hasItem() && !idempResponse.item().isEmpty()) {
+                    Map<String, AttributeValue> idempItem = idempResponse.item();
+                    long expiresAt = Long.parseLong(idempItem.get("expiresAt").n());
+                    if (expiresAt > Instant.now().getEpochSecond()) {
+                        int cachedStatus = Integer.parseInt(idempItem.get("statusCode").n());
+                        String cachedBody = idempItem.get("responseBody").s();
+                        logger.info("Idempotent response returned",
+                                Map.of("idempotencyKey", idempotencyKey));
+                        return response(cachedStatus, cachedBody);
                     }
                 }
             }
 
-            if (!outOfStock.isEmpty()) {
-                String errorBody = mapper.writeValueAsString(Map.of(
-                        "error", "Insufficient stock",
-                        "items", outOfStock
-                ));
+            // --- Atomic stock reservation via TransactWriteItems (P1.1) ---
+            List<TransactWriteItem> transactItems = new ArrayList<>();
+            for (OrderItem item : items) {
+                transactItems.add(TransactWriteItem.builder()
+                        .update(Update.builder()
+                                .tableName(PRODUCTS_TABLE)
+                                .key(Map.of("productID", AttributeValue.fromS(item.getProductId())))
+                                .updateExpression("SET stock = stock - :qty")
+                                .conditionExpression("stock >= :qty")
+                                .expressionAttributeValues(Map.of(
+                                        ":qty", AttributeValue.fromN(String.valueOf(item.getQuantity()))
+                                ))
+                                .build())
+                        .build());
+            }
+
+            try {
+                DYNAMO_CLIENT.transactWriteItems(TransactWriteItemsRequest.builder()
+                        .transactItems(transactItems)
+                        .build());
+            } catch (TransactionCanceledException e) {
+                List<Map<String, String>> outOfStock = new ArrayList<>();
+                List<CancellationReason> reasons = e.cancellationReasons();
+                for (int i = 0; i < reasons.size() && i < items.size(); i++) {
+                    if ("ConditionalCheckFailed".equals(reasons.get(i).code())) {
+                        outOfStock.add(Map.of(
+                                "productId", items.get(i).getProductId(),
+                                "reason", "insufficient stock"
+                        ));
+                    }
+                }
+                String errorBody = MAPPER.writeValueAsString(Map.of(
+                        "error", "Insufficient stock", "items", outOfStock));
+                METRICS.count("StockInsufficient");
                 return response(409, errorBody);
             }
 
-            // Phase 2: conditional reservation (atomic decrement per item)
-            List<OrderItem> reserved = new ArrayList<>();
-            for (OrderItem item : items) {
-                Map<String, AttributeValue> key = Map.of(
-                        "productID", AttributeValue.fromS(item.getProductId())
-                );
-                Map<String, AttributeValue> exprValues = new HashMap<>();
-                exprValues.put(":qty", AttributeValue.fromN(String.valueOf(item.getQuantity())));
-
-                try {
-                    productsClient.updateItem(UpdateItemRequest.builder()
-                            .tableName(productsTable)
-                            .key(key)
-                            .updateExpression("SET stock = stock - :qty")
-                            .conditionExpression("stock >= :qty")
-                            .expressionAttributeValues(exprValues)
-                            .build());
-                    reserved.add(item);
-                } catch (ConditionalCheckFailedException e) {
-                    // Rollback already-reserved items
-                    for (OrderItem reservedItem : reserved) {
-                        Map<String, AttributeValue> rollbackKey = Map.of(
-                                "productID", AttributeValue.fromS(reservedItem.getProductId())
-                        );
-                        Map<String, AttributeValue> rollbackValues = Map.of(
-                                ":qty", AttributeValue.fromN(String.valueOf(reservedItem.getQuantity()))
-                        );
-                        productsClient.updateItem(UpdateItemRequest.builder()
-                                .tableName(productsTable)
-                                .key(rollbackKey)
-                                .updateExpression("SET stock = stock + :qty")
-                                .expressionAttributeValues(rollbackValues)
-                                .build());
-                    }
-                    String errorBody = mapper.writeValueAsString(Map.of(
-                            "error", "Insufficient stock",
-                            "items", List.of(Map.of("productId", item.getProductId(), "reason", "race condition"))
-                    ));
-                    return response(409, errorBody);
-                }
-            }
-
+            // --- Save order ---
             double total = items.stream()
                     .mapToDouble(i -> i.getPrice() * i.getQuantity())
                     .sum();
 
             String orderId = UUID.randomUUID().toString();
-            String itemsJson = mapper.writeValueAsString(items);
+            String itemsJson = MAPPER.writeValueAsString(items);
 
             Order order = new Order();
             order.setOrderId(orderId);
@@ -153,28 +171,54 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             order.setStatus("PENDING");
             order.setCreatedAt(Instant.now().toString());
 
-            repository.saveOrder(order);
+            REPOSITORY.saveOrder(order);
 
+            // --- Publish event ---
             OrderPlacedEvent event = new OrderPlacedEvent(orderId, userId, items, total);
-            String eventJson = mapper.writeValueAsString(event);
-
-            sqsClient.sendMessage(SendMessageRequest.builder()
-                    .queueUrl(queueUrl)
+            String eventJson = MAPPER.writeValueAsString(event);
+            SQS_CLIENT.sendMessage(SendMessageRequest.builder()
+                    .queueUrl(QUEUE_URL)
                     .messageBody(eventJson)
                     .build());
 
-            context.getLogger().log("Order placed: " + orderId + " for user: " + userId);
+            logger.info("Order placed", Map.of("orderId", orderId, "userId", userId));
+            METRICS.count("OrderPlaced");
 
-            String responseBody = mapper.writeValueAsString(Map.of("orderId", orderId));
+            String responseBody = MAPPER.writeValueAsString(Map.of("orderId", orderId));
+
+            // --- Store idempotency record ---
+            if (idempotencyKey != null && IDEMPOTENCY_TABLE != null) {
+                Map<String, AttributeValue> idempItem = new HashMap<>();
+                idempItem.put("idempotencyKey", AttributeValue.fromS(idempotencyKey));
+                idempItem.put("orderId", AttributeValue.fromS(orderId));
+                idempItem.put("statusCode", AttributeValue.fromN("201"));
+                idempItem.put("responseBody", AttributeValue.fromS(responseBody));
+                idempItem.put("expiresAt", AttributeValue.fromN(
+                        String.valueOf(Instant.now().getEpochSecond() + 86400)));
+                DYNAMO_CLIENT.putItem(PutItemRequest.builder()
+                        .tableName(IDEMPOTENCY_TABLE)
+                        .item(idempItem)
+                        .build());
+            }
+
             return Map.of(
                     "statusCode", 201,
                     "headers", Map.of("Content-Type", "application/json"),
                     "body", responseBody
             );
+
         } catch (Exception e) {
-            context.getLogger().log("Error placing order: " + e.getMessage());
+            logger.error("Order placement failed", Map.of("error", String.valueOf(e.getMessage())));
+            METRICS.count("OrderFailed");
             return response(500, "{\"error\":\"Failed to place order\"}");
         }
+    }
+
+    private String extractHeader(Map<String, Object> headers, String name) {
+        if (headers == null) return null;
+        Object val = headers.get(name);
+        if (val == null) val = headers.get(name.toLowerCase());
+        return val != null ? val.toString() : null;
     }
 
     private Map<String, Object> response(int statusCode, String body) {

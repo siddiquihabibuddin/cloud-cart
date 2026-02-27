@@ -9,10 +9,11 @@ import java.util.*;
 
 public class ListProductsHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
-    private final ProductRepository repository = new ProductRepository();
-    private final ObjectMapper mapper = new ObjectMapper();
+    private static final ProductRepository REPOSITORY = new ProductRepository();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Override
+    @SuppressWarnings("unchecked")
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
         try {
             Map<String, String> queryParams = (Map<String, String>) input.get("queryStringParameters");
@@ -22,15 +23,21 @@ public class ListProductsHandler implements RequestHandler<Map<String, Object>, 
 
             if (queryParams != null) {
                 if (queryParams.containsKey("limit")) {
-                    limit = Integer.parseInt(queryParams.get("limit"));
+                    String limitStr = queryParams.get("limit");
+                    try {
+                        limit = Integer.parseInt(limitStr);
+                    } catch (NumberFormatException e) {
+                        return response(400, "{\"error\":\"limit must be a numeric value\"}");
+                    }
+                    limit = Math.max(1, Math.min(limit, 100));
                 }
                 if (queryParams.containsKey("lastKey")) {
                     lastKey = queryParams.get("lastKey");
                 }
             }
 
-            Map<String, Object> result = repository.getAllProducts(limit, lastKey);
-            return response(200, mapper.writeValueAsString(result));
+            Map<String, Object> result = REPOSITORY.getAllProducts(limit, lastKey);
+            return response(200, MAPPER.writeValueAsString(result));
         } catch (Exception e) {
             context.getLogger().log("Error in ListProductsHandler: " + e.getMessage());
             return response(500, "{\"error\":\"Unable to list products\"}");

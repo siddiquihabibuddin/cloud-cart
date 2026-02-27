@@ -6,21 +6,39 @@ import com.cloudcart.product.model.Product;
 import com.cloudcart.product.repository.ProductRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 public class CreateProductHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final ProductRepository repository = new ProductRepository();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ProductRepository REPOSITORY = new ProductRepository();
 
     @Override
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
         try {
             String body = (String) input.get("body");
-            Product product = mapper.readValue(body, Product.class);
+            Product product = MAPPER.readValue(body, Product.class);
+
+            List<String> errors = new ArrayList<>();
+            if (product.getTitle() == null || product.getTitle().isBlank()) {
+                errors.add("title is required");
+            }
+            if (product.getPrice() < 0) {
+                errors.add("price must be >= 0");
+            }
+            if (product.getStock() < 0) {
+                errors.add("stock must be >= 0");
+            }
+            if (!errors.isEmpty()) {
+                return response(400, MAPPER.writeValueAsString(
+                        Map.of("error", "Validation failed", "details", errors)));
+            }
+
             product.setProductId(UUID.randomUUID().toString());
-            repository.saveProduct(product);
+            REPOSITORY.saveProduct(product);
             return response(201, "{\"id\":\"" + product.getProductId() + "\"}");
         } catch (Exception e) {
             context.getLogger().log("Error in CreateProductHandler: " + e.getMessage());

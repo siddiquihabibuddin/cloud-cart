@@ -25,12 +25,42 @@ Resources:
             ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
 
+  ### DynamoDB Table for Idempotency ###
+  IdempotencyTableDev:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: IdempotencyTableDev
+      AttributeDefinitions:
+        - AttributeName: idempotencyKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: idempotencyKey
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  ### Dead Letter Queues ###
+  OrderPlacedDLQDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderPlacedDLQDev
+
+  PaymentSuccessDLQDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: PaymentSuccessDLQDev
+
   ### SQS Queue for Order Events ###
   OrderPlacedQueueDev:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: OrderPlacedQueueDev
       VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OrderPlacedDLQDev.Arn
+        maxReceiveCount: 3
 
   ### SQS Queue for Payment Success Events ###
   PaymentSuccessQueueDev:
@@ -38,6 +68,44 @@ Resources:
     Properties:
       QueueName: PaymentSuccessQueueDev
       VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PaymentSuccessDLQDev.Arn
+        maxReceiveCount: 3
+
+  ### CloudWatch Alarms for DLQs ###
+  OrderPlacedDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: cloudcart-OrderPlacedDLQ-MessagesVisible
+      AlarmDescription: Alert when messages appear in OrderPlacedDLQ
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt OrderPlacedDLQDev.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  PaymentSuccessDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: cloudcart-PaymentSuccessDLQ-MessagesVisible
+      AlarmDescription: Alert when messages appear in PaymentSuccessDLQ
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt PaymentSuccessDLQDev.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
 
   ### IAM Role for Order Lambdas ###
   OrderLambdaRoleDev:
@@ -76,6 +144,11 @@ Resources:
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ProductsTableDev"
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt IdempotencyTableDev.Arn
+              - Effect: Allow
+                Action:
                   - sqs:SendMessage
                 Resource: !GetAtt OrderPlacedQueueDev.Arn
 
@@ -97,6 +170,7 @@ Resources:
           ORDERS_TABLE: !Ref OrdersTableDev
           ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
           PRODUCTS_TABLE: ProductsTableDev
+          IDEMPOTENCY_TABLE: !Ref IdempotencyTableDev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   GetOrderFunctionDev:
@@ -190,6 +264,7 @@ Resources:
       ResourceId: !Ref OrdersResourceDev
       HttpMethod: POST
       AuthorizationType: NONE
+      ApiKeyRequired: true
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -202,6 +277,7 @@ Resources:
       ResourceId: !Ref OrderByIdResourceDev
       HttpMethod: GET
       AuthorizationType: NONE
+      ApiKeyRequired: true
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -214,6 +290,7 @@ Resources:
       ResourceId: !Ref OrdersResourceDev
       HttpMethod: GET
       AuthorizationType: NONE
+      ApiKeyRequired: true
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -236,6 +313,30 @@ Resources:
       DeploymentId: !Ref OrderApiDeploymentDev
       StageName: dev
 
+  ### API Key Auth ###
+  OrderApiKeyDev:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: OrderApiKeyDev
+      Value: cloudcart-dev-key-2024
+      Enabled: true
+
+  OrderUsagePlanDev:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: OrderApiStageDev
+    Properties:
+      UsagePlanName: OrderUsagePlanDev
+      ApiStages:
+        - ApiId: !Ref OrderApiDev
+          Stage: dev
+
+  OrderUsagePlanKeyDev:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref OrderApiKeyDev
+      KeyType: API_KEY
+      UsagePlanId: !Ref OrderUsagePlanDev
+
 Outputs:
 
   OrderQueueArn:
@@ -250,6 +351,12 @@ Outputs:
     Export:
       Name: cloudcart-order-OrderQueueUrl
 
+  OrderPlacedDLQArn:
+    Description: "ARN of the OrderPlaced dead letter queue"
+    Value: !GetAtt OrderPlacedDLQDev.Arn
+    Export:
+      Name: cloudcart-order-OrderPlacedDLQArn
+
   PaymentSuccessQueueArn:
     Description: "ARN of the payment success SQS queue"
     Value: !GetAtt PaymentSuccessQueueDev.Arn
@@ -261,6 +368,12 @@ Outputs:
     Value: !Ref PaymentSuccessQueueDev
     Export:
       Name: cloudcart-order-PaymentSuccessQueueUrl
+
+  PaymentSuccessDLQArn:
+    Description: "ARN of the PaymentSuccess dead letter queue"
+    Value: !GetAtt PaymentSuccessDLQDev.Arn
+    Export:
+      Name: cloudcart-order-PaymentSuccessDLQArn
 
   OrdersTableName:
     Description: "DynamoDB table name for orders"

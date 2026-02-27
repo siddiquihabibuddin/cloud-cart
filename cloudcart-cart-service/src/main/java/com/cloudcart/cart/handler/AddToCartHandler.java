@@ -6,20 +6,41 @@ import com.cloudcart.cart.model.CartItem;
 import com.cloudcart.cart.repository.CartRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class AddToCartHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final CartRepository repository = new CartRepository();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final CartRepository REPOSITORY = new CartRepository();
 
     @Override
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
         try {
             String body = (String) input.get("body");
-            CartItem item = mapper.readValue(body, CartItem.class);
+            CartItem item = MAPPER.readValue(body, CartItem.class);
+
+            List<String> errors = new ArrayList<>();
+            if (item.getUserId() == null || item.getUserId().isBlank()) {
+                errors.add("userId is required");
+            }
+            if (item.getProductId() == null || item.getProductId().isBlank()) {
+                errors.add("productId is required");
+            }
+            if (item.getQuantity() < 1) {
+                errors.add("quantity must be >= 1");
+            }
+            if (item.getPrice() < 0) {
+                errors.add("price must be >= 0");
+            }
+            if (!errors.isEmpty()) {
+                return response(400, MAPPER.writeValueAsString(
+                        Map.of("error", "Validation failed", "details", errors)));
+            }
+
             item.setAddedAt(java.time.Instant.now().toString());
-            repository.addItem(item);
+            REPOSITORY.addItem(item);
             return response(200, "{\"message\":\"Item added to cart\"}");
         } catch (Exception e) {
             context.getLogger().log("Error: " + e.getMessage());

@@ -30,6 +30,12 @@ Resources:
                 Resource: !ImportValue cloudcart-order-PaymentSuccessQueueArn
               - Effect: Allow
                 Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !ImportValue cloudcart-order-PaymentSuccessDLQArn
+              - Effect: Allow
+                Action:
                   - dynamodb:UpdateItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
 
@@ -59,3 +65,5 @@ Resources:
       FunctionName: !GetAtt ProcessShipmentFunctionDev.Arn
       BatchSize: 5
       Enabled: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures

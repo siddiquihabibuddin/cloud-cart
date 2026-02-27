@@ -17,17 +17,18 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 
     ┌─────────────────────────────────────────────────┐
     │                  order-service                  │
-    │  stock check → reserve inventory → DynamoDB     │
-    │  (PENDING) → OrderPlacedEvent → SQS             │
+    │  validate → idempotency check → TransactWrite   │
+    │  (atomic stock reservation) → DynamoDB PENDING  │
+    │  → OrderPlacedEvent → SQS                       │
     └──────────────────────────┬──────────────────────┘
-                               │ OrderPlacedQueueDev
+                               │ OrderPlacedQueueDev (DLQ: OrderPlacedDLQDev)
                     ┌──────────▼──────────┐
                     │   payment-service   │
                     │  80% PAID / 20% FAILED           │
                     │  → UpdateItem DynamoDB            │
                     │  If PAID → PaymentSuccessEvent   │
                     └──────────┬──────────┘
-                               │ PaymentSuccessQueueDev
+                               │ PaymentSuccessQueueDev (DLQ: PaymentSuccessDLQDev)
                     ┌──────────▼──────────┐
                     │  shipment-service   │
                     │  generate trackingId             │
@@ -41,7 +42,7 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 |---|---|---|---|
 | `cloudcart-product-catalog-java` | Java 21 Lambda | REST API | `ProductsTableDev` |
 | `cloudcart-cart-service` | Java 21 Lambda | REST API | `CartTableDev` |
-| `cloudcart-order-service` | Java 21 Lambda | REST API | `OrdersTableDev` + SQS |
+| `cloudcart-order-service` | Java 21 Lambda | REST API | `OrdersTableDev`, `IdempotencyTableDev` |
 | `cloudcart-payment-service` | Java 21 Lambda | SQS (`OrderPlacedQueueDev`) | `OrdersTableDev` |
 | `cloudcart-shipment-service` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev` |
 | `cloudcart-frontend` | Next.js | — | — |
@@ -51,7 +52,7 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 ### Product Catalog
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/products` | List products (paginated) |
+| `GET` | `/products?limit=N&lastKey=X` | List products (paginated, limit capped 1–100) |
 | `POST` | `/products` | Create product |
 | `GET` | `/products/{id}` | Get product |
 | `PATCH` | `/products/{id}/stock` | Update stock |
@@ -65,25 +66,49 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
 | `DELETE` | `/cart/{userId}/{productId}` | Remove item |
 
 ### Orders
+All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
+
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/orders` | Place order — reserves stock, returns 409 if insufficient |
+| `POST` | `/orders` | Place order — atomic stock reservation, returns 409 if insufficient |
 | `GET` | `/orders/{orderId}` | Get order (includes `trackingId` and `shippedAt` once shipped) |
 | `GET` | `/orders?userId=X` | List user's orders |
+
+`POST /orders` accepts an optional `Idempotency-Key` header — repeated requests with the same key return the cached response for 24 hours.
 
 ## Order Flow
 
 1. Customer adds items to cart and navigates to `/checkout`
-2. "Place Order" sends `POST /orders`
-   - Stock is checked per item (`GetItem` on `ProductsTableDev`)
+2. "Place Order" sends `POST /orders` with `x-api-key` header
+   - Input is validated (userId required, quantity ≥ 1, price ≥ 0)
+   - Idempotency key is checked against `IdempotencyTableDev` (24h TTL)
+   - Stock is atomically decremented via a single `TransactWriteItems` call across all items
    - If any item is out of stock → **409** `{"error":"Insufficient stock","items":[...]}`
-   - Stock is atomically decremented via conditional `UpdateItem` (race-condition safe)
    - Order saved as **PENDING**, `OrderPlacedEvent` published to `OrderPlacedQueueDev`
+   - Successful response is cached in `IdempotencyTableDev`
 3. Payment Lambda consumes the event → **80% PAID / 20% FAILED**
+   - Failed records are reported via `ReportBatchItemFailures` — retried up to 3× before landing in `OrderPlacedDLQDev`
    - If PAID → publishes `PaymentSuccessEvent` to `PaymentSuccessQueueDev`
 4. Shipment Lambda consumes the payment event → generates `TRK-XXXXXXXX` tracking ID
    - Order updated to **SHIPPED** with `trackingId` and `shippedAt`
+   - Failed records retry up to 3× before landing in `PaymentSuccessDLQDev`
 5. Checkout page polls `GET /orders/{id}` every 2s — status progresses PENDING → PAID → SHIPPED
+
+## Reliability Features
+
+| Feature | Details |
+|---|---|
+| **Idempotency** | `POST /orders` deduplicates on `Idempotency-Key` header; results cached 24h in DynamoDB |
+| **Atomic stock reservation** | Single `TransactWriteItems` call — no partial updates or rollback logic |
+| **Dead Letter Queues** | `OrderPlacedDLQDev` and `PaymentSuccessDLQDev`; messages moved after 3 failed delivery attempts |
+| **Batch item failures** | Payment and shipment Lambdas return `batchItemFailures` so only failed records are retried |
+| **API key auth** | All order endpoints require `x-api-key: cloudcart-dev-key-2024` |
+| **Input validation** | 400s for blank fields, quantity < 1, negative prices, non-numeric pagination params |
+| **SDK retry** | All DynamoDB/SQS clients configured with 3 retries + exponential backoff |
+| **Static SDK clients** | Clients initialised once per Lambda container; reused across warm invocations |
+| **Structured logging** | JSON logs to stdout with `timestamp`, `level`, `service`, `correlationId` fields |
+| **CloudWatch metrics** | EMF-format metrics emitted to stdout: `OrderPlaced`, `StockInsufficient`, `PaymentSucceeded`, `PaymentFailed`, `ShipmentInitiated`, and error counters |
+| **CloudWatch alarms** | `ApproximateNumberOfMessagesVisible > 0` on both DLQs |
 
 ## Prerequisites
 

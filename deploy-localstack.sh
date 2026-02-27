@@ -38,33 +38,38 @@ awslocal s3 cp "$ORDER_DIR/target/$ORDER_JAR"       "s3://$S3_BUCKET/$ORDER_JAR"
 awslocal s3 cp "$PAYMENT_DIR/target/$PAYMENT_JAR"   "s3://$S3_BUCKET/$PAYMENT_JAR"
 awslocal s3 cp "$SHIPMENT_DIR/target/$SHIPMENT_JAR" "s3://$S3_BUCKET/$SHIPMENT_JAR"
 
+cf_deploy() {
+  # cloudformation deploy exits 255 when there are no changes; treat that as success
+  awslocal cloudformation deploy "$@" || { [ $? -eq 255 ] && echo "  (no changes)"; }
+}
+
 echo "==> Deploying cart service stack..."
-awslocal cloudformation deploy \
+cf_deploy \
   --template-file "$CART_DIR/cloudcart-cart-template.yaml" \
   --stack-name cloudcart-cart-dev \
   --capabilities CAPABILITY_NAMED_IAM
 
 echo "==> Deploying product catalog stack..."
-awslocal cloudformation deploy \
+cf_deploy \
   --template-file "$PRODUCT_DIR/cloudcart-template.yaml" \
   --stack-name cloudcart-products-dev \
   --capabilities CAPABILITY_NAMED_IAM
 
 # Order stack must deploy before payment and shipment (both import queue ARNs and table name)
 echo "==> Deploying order service stack..."
-awslocal cloudformation deploy \
+cf_deploy \
   --template-file "$ORDER_DIR/cloudcart-order-template.yaml" \
   --stack-name cloudcart-order-dev \
   --capabilities CAPABILITY_NAMED_IAM
 
 echo "==> Deploying payment service stack..."
-awslocal cloudformation deploy \
+cf_deploy \
   --template-file "$PAYMENT_DIR/cloudcart-payment-template.yaml" \
   --stack-name cloudcart-payment-dev \
   --capabilities CAPABILITY_NAMED_IAM
 
 echo "==> Deploying shipment service stack..."
-awslocal cloudformation deploy \
+cf_deploy \
   --template-file "$SHIPMENT_DIR/cloudcart-shipment-template.yaml" \
   --stack-name cloudcart-shipment-dev \
   --capabilities CAPABILITY_NAMED_IAM

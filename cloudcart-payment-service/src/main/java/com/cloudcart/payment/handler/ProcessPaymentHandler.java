@@ -4,7 +4,11 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.cloudcart.payment.model.OrderPlacedEvent;
 import com.cloudcart.payment.model.PaymentSuccessEvent;
+import com.cloudcart.payment.util.JsonLogger;
+import com.cloudcart.payment.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
@@ -14,79 +18,117 @@ import software.amazon.awssdk.services.sqs.SqsClientBuilder;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>, Void> {
+public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final DynamoDbClient dynamoDbClient;
-    private final SqsClient sqsClient;
-    private final String ordersTable = System.getenv("ORDERS_TABLE");
-    private final String paymentSuccessQueueUrl = System.getenv("PAYMENT_SUCCESS_QUEUE_URL");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Payments");
+    private static final DynamoDbClient DYNAMO_CLIENT;
+    private static final SqsClient SQS_CLIENT;
+    private static final String ORDERS_TABLE = System.getenv("ORDERS_TABLE");
+    private static final String PAYMENT_SUCCESS_QUEUE_URL = System.getenv("PAYMENT_SUCCESS_QUEUE_URL");
 
-    public ProcessPaymentHandler() {
+    static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
+        ClientOverrideConfiguration overrideConfig = ClientOverrideConfiguration.builder()
+                .retryPolicy(RetryPolicy.builder().numRetries(3).build())
+                .build();
 
-        DynamoDbClientBuilder dynamoBuilder = DynamoDbClient.builder();
+        DynamoDbClientBuilder dynamoBuilder = DynamoDbClient.builder().overrideConfiguration(overrideConfig);
         if (endpointUrl != null && !endpointUrl.isEmpty()) {
             dynamoBuilder.endpointOverride(URI.create(endpointUrl));
         }
-        this.dynamoDbClient = dynamoBuilder.build();
+        DYNAMO_CLIENT = dynamoBuilder.build();
 
-        SqsClientBuilder sqsBuilder = SqsClient.builder();
+        SqsClientBuilder sqsBuilder = SqsClient.builder().overrideConfiguration(overrideConfig);
         if (endpointUrl != null && !endpointUrl.isEmpty()) {
             sqsBuilder.endpointOverride(URI.create(endpointUrl));
         }
-        this.sqsClient = sqsBuilder.build();
+        SQS_CLIENT = sqsBuilder.build();
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public Void handleRequest(Map<String, Object> input, Context context) {
+    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+        JsonLogger logger = new JsonLogger("payment-service", null);
+        List<Map<String, String>> failedItems = new ArrayList<>();
+
         List<Map<String, Object>> records = (List<Map<String, Object>>) input.get("Records");
         if (records == null) {
-            context.getLogger().log("No records in SQS event");
-            return null;
+            logger.info("No records in SQS event", null);
+            return buildBatchResponse(failedItems);
         }
 
         for (Map<String, Object> record : records) {
+            String messageId = (String) record.get("messageId");
             try {
                 String body = (String) record.get("body");
-                OrderPlacedEvent event = mapper.readValue(body, OrderPlacedEvent.class);
+                OrderPlacedEvent event = MAPPER.readValue(body, OrderPlacedEvent.class);
 
                 String status = Math.random() < 0.8 ? "PAID" : "FAILED";
 
-                dynamoDbClient.updateItem(UpdateItemRequest.builder()
-                        .tableName(ordersTable)
+                DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                        .tableName(ORDERS_TABLE)
                         .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
                         .updateExpression("SET #s = :status")
                         .expressionAttributeNames(Map.of("#s", "status"))
                         .expressionAttributeValues(Map.of(":status", AttributeValue.fromS(status)))
                         .build());
 
-                context.getLogger().log("Payment processed for order " + event.getOrderId()
-                        + " (user: " + event.getUserId()
-                        + ", total: " + event.getTotalAmount()
-                        + "): " + status);
+                logger.info("Payment processed", Map.of(
+                        "orderId", event.getOrderId(),
+                        "userId", event.getUserId(),
+                        "total", String.valueOf(event.getTotalAmount()),
+                        "status", status));
 
-                if ("PAID".equals(status) && paymentSuccessQueueUrl != null) {
-                    PaymentSuccessEvent successEvent = new PaymentSuccessEvent(
-                            event.getOrderId(), event.getUserId(), event.getItems(), event.getTotalAmount()
-                    );
-                    String eventJson = mapper.writeValueAsString(successEvent);
-                    sqsClient.sendMessage(SendMessageRequest.builder()
-                            .queueUrl(paymentSuccessQueueUrl)
-                            .messageBody(eventJson)
-                            .build());
-                    context.getLogger().log("Published PaymentSuccessEvent for order " + event.getOrderId());
+                if ("PAID".equals(status)) {
+                    METRICS.count("PaymentSucceeded");
+                    if (PAYMENT_SUCCESS_QUEUE_URL != null) {
+                        try {
+                            PaymentSuccessEvent successEvent = new PaymentSuccessEvent(
+                                    event.getOrderId(), event.getUserId(),
+                                    event.getItems(), event.getTotalAmount()
+                            );
+                            SQS_CLIENT.sendMessage(SendMessageRequest.builder()
+                                    .queueUrl(PAYMENT_SUCCESS_QUEUE_URL)
+                                    .messageBody(MAPPER.writeValueAsString(successEvent))
+                                    .build());
+                            logger.info("Published PaymentSuccessEvent",
+                                    Map.of("orderId", event.getOrderId()));
+                        } catch (Exception sqsEx) {
+                            logger.error("Failed to publish PaymentSuccessEvent", Map.of(
+                                    "orderId", event.getOrderId(),
+                                    "error", String.valueOf(sqsEx.getMessage())));
+                            if (messageId != null) {
+                                failedItems.add(Map.of("itemIdentifier", messageId));
+                            }
+                        }
+                    }
+                } else {
+                    METRICS.count("PaymentFailed");
                 }
 
             } catch (Exception e) {
-                context.getLogger().log("Error processing payment record: " + e.getMessage());
+                logger.error("Error processing payment record", Map.of(
+                        "messageId", messageId != null ? messageId : "unknown",
+                        "error", String.valueOf(e.getMessage())));
+                METRICS.count("PaymentError");
+                if (messageId != null) {
+                    failedItems.add(Map.of("itemIdentifier", messageId));
+                }
             }
         }
 
-        return null;
+        return buildBatchResponse(failedItems);
+    }
+
+    private Map<String, Object> buildBatchResponse(List<Map<String, String>> failedItems) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("batchItemFailures", failedItems);
+        return response;
     }
 }

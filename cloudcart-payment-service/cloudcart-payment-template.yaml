@@ -30,6 +30,12 @@ Resources:
                 Resource: !ImportValue cloudcart-order-OrderQueueArn
               - Effect: Allow
                 Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !ImportValue cloudcart-order-OrderPlacedDLQArn
+              - Effect: Allow
+                Action:
                   - sqs:SendMessage
                 Resource: !ImportValue cloudcart-order-PaymentSuccessQueueArn
               - Effect: Allow
@@ -64,3 +70,5 @@ Resources:
       FunctionName: !GetAtt ProcessPaymentFunctionDev.Arn
       BatchSize: 5
       Enabled: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
