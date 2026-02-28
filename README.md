@@ -123,6 +123,20 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 | **CloudWatch metrics** | EMF-format metrics emitted to stdout: `OrderPlaced`, `StockInsufficient`, `PaymentSucceeded`, `PaymentFailed`, `ShipmentInitiated`, and error counters |
 | **CloudWatch alarms** | `ApproximateNumberOfMessagesVisible > 0` on both DLQs |
 
+## Screenshots
+
+### Product Listing
+![Product Listing](screenshots/product-listing.png)
+
+### Cart
+![Cart](screenshots/cart.png)
+
+### Checkout
+![Checkout](screenshots/checkout.png)
+
+### Order Placed
+![Order Placed](screenshots/place-order.png)
+
 ## Prerequisites
 
 - Docker
