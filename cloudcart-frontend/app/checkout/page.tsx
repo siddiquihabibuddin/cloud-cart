@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { getCart, CartItem } from "@/lib/cart";
+import { getCart, clearCart, CartItem } from "@/lib/cart";
 import { useCart } from "@/lib/CartContext";
 import { placeOrder, getOrder } from "@/lib/api";
 
+const POLLING_TIMEOUT_MSG =
+  "Order is being processed — check back shortly.";
+
 interface OrderStatus {
   orderId: string;
-  status: "PENDING" | "PAID" | "FAILED";
+  status: "PENDING" | "PAID" | "FAILED" | "TIMEOUT";
 }
 
 export default function CheckoutPage() {
@@ -45,9 +48,10 @@ export default function CheckoutPage() {
   const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
   async function pollOrderStatus(orderId: string, uid: string) {
-    const maxAttempts = 5;
+    const maxAttempts = 20;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await new Promise((r) => setTimeout(r, 2000));
+      const delay = Math.min(2000 * Math.pow(1.3, attempt), 5000);
+      await new Promise((r) => setTimeout(r, delay));
       try {
         const order = await getOrder(orderId, uid);
         setOrderStatus({ orderId, status: order.status as OrderStatus["status"] });
@@ -56,6 +60,9 @@ export default function CheckoutPage() {
         // keep polling
       }
     }
+    setOrderStatus((prev) =>
+      prev ? { ...prev, status: "TIMEOUT" } : null
+    );
   }
 
   async function handlePlaceOrder() {
@@ -72,7 +79,7 @@ export default function CheckoutPage() {
 
       const result = await placeOrder(userId, orderItems);
       setOrderStatus({ orderId: result.orderId, status: "PENDING" });
-      refreshCartCount();
+      clearCart(userId).then(() => refreshCartCount()).catch(() => refreshCartCount());
       await pollOrderStatus(result.orderId, userId);
     } catch {
       setError("Failed to place order. Please try again.");
@@ -99,6 +106,7 @@ export default function CheckoutPage() {
   if (orderStatus) {
     const isPending = orderStatus.status === "PENDING";
     const isPaid = orderStatus.status === "PAID";
+    const isTimeout = orderStatus.status === "TIMEOUT";
 
     return (
       <div className="max-w-lg mx-auto text-center py-16">
@@ -106,19 +114,21 @@ export default function CheckoutPage() {
           className={`rounded-2xl p-10 border ${
             isPaid
               ? "bg-green-50 border-green-200"
-              : isPending
+              : isPending || isTimeout
               ? "bg-yellow-50 border-yellow-200"
               : "bg-red-50 border-red-200"
           }`}
         >
           <div className="text-5xl mb-4">
-            {isPaid ? "✓" : isPending ? "⏳" : "✕"}
+            {isPaid ? "✓" : isPending || isTimeout ? "⏳" : "✕"}
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">
             {isPaid
               ? "Payment Successful!"
               : isPending
               ? "Processing Payment…"
+              : isTimeout
+              ? "Order Submitted"
               : "Payment Failed"}
           </h2>
           <p className="text-gray-500 text-sm mb-1">
@@ -131,18 +141,23 @@ export default function CheckoutPage() {
               className={`font-semibold ${
                 isPaid
                   ? "text-green-600"
-                  : isPending
+                  : isPending || isTimeout
                   ? "text-yellow-600"
                   : "text-red-600"
               }`}
             >
-              {orderStatus.status}
+              {isTimeout ? "PENDING" : orderStatus.status}
             </span>
           </p>
 
           {isPending && (
             <p className="text-gray-400 text-xs mb-6">
               Payment is being processed. This page updates automatically.
+            </p>
+          )}
+          {isTimeout && (
+            <p className="text-gray-400 text-xs mb-6">
+              {POLLING_TIMEOUT_MSG}
             </p>
           )}
 
@@ -187,7 +202,7 @@ export default function CheckoutPage() {
                 >
                   <div>
                     <p className="text-sm font-medium text-gray-800">
-                      {item.productId}
+                      {item.title || item.productId}
                     </p>
                     <p className="text-xs text-gray-400">
                       Qty: {item.quantity} × ${item.price.toFixed(2)}

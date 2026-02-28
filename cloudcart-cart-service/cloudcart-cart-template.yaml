@@ -122,6 +122,24 @@ Resources:
           ENV: dev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
+  ClearCartFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ClearCartFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.cart.handler.ClearCartHandler::handleRequest
+      Role: !GetAtt CartLambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: cart-service-1.0.0.jar
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          CART_TABLE: !Ref CartTableDev
+          ENV: dev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
   ### Lambda Permissions for API Gateway ###
   AddToCartInvokePermissionDev:
     Type: AWS::Lambda::Permission
@@ -152,6 +170,14 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref UpdateQuantityFunctionDev
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CartApiDev}/*/*
+
+  ClearCartInvokePermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ClearCartFunctionDev
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CartApiDev}/*/*
 
@@ -232,6 +258,18 @@ Resources:
         IntegrationHttpMethod: POST
         Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpdateQuantityFunctionDev.Arn}/invocations
 
+  DeleteCartUserMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref CartApiDev
+      ResourceId: !Ref CartUserIdResourceDev
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ClearCartFunctionDev.Arn}/invocations
+
   ### Deployment & Stage ###
   CartApiDeploymentDev:
     Type: AWS::ApiGateway::Deployment
@@ -240,6 +278,7 @@ Resources:
       - GetCartMethodDev
       - DeleteCartMethodDev
       - PatchCartMethodDev
+      - DeleteCartUserMethodDev
     Properties:
       RestApiId: !Ref CartApiDev
 
@@ -279,3 +318,8 @@ Outputs:
     Value: !GetAtt UpdateQuantityFunctionDev.Arn
     Export:
       Name: cloudcart-cart-UpdateQuantityFunctionArn
+
+  ClearCartFunctionArn:
+    Value: !GetAtt ClearCartFunctionDev.Arn
+    Export:
+      Name: cloudcart-cart-ClearCartFunctionArn

@@ -24,6 +24,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,7 +37,9 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Payments");
     private static final DynamoDbClient DYNAMO_CLIENT;
     private static final SqsClient SQS_CLIENT;
-    private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
     private static final String ORDERS_TABLE = System.getenv("ORDERS_TABLE");
     private static final String PAYMENT_SUCCESS_QUEUE_URL = System.getenv("PAYMENT_SUCCESS_QUEUE_URL");
     private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
@@ -175,9 +179,12 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(PRODUCTS_API_URL + "/products/" + productId + "/stock"))
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(10))
                     .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+        } catch (HttpTimeoutException e) {
+            logger.error("Timeout releasing stock after payment failure", Map.of("productId", productId));
         } catch (Exception e) {
             logger.error("Failed to release stock after payment failure", Map.of(
                     "productId", productId, "error", String.valueOf(e.getMessage())));

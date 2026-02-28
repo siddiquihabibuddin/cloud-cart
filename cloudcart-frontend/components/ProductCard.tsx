@@ -25,18 +25,21 @@ export default function ProductCard({ product, userId }: ProductCardProps) {
     }
     setLoading(true);
     setError(null);
+    setStock((s) => Math.max(0, s - 1));
     try {
       await addToCart({
         userId,
         productId: product.productId,
+        title: product.title,
         quantity: 1,
         price: product.price,
       });
-      setStock((s) => Math.max(0, s - 1));
       setAdded(true);
       refreshCartCount();
       setTimeout(() => setAdded(false), 2000);
     } catch {
+      setStock((s) => s + 1);
+      setAdded(false);
       setError("Failed to add.");
     } finally {
       setLoading(false);

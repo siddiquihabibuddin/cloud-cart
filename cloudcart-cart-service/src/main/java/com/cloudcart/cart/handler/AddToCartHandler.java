@@ -28,6 +28,9 @@ public class AddToCartHandler implements RequestHandler<Map<String, Object>, Map
             if (item.getProductId() == null || item.getProductId().isBlank()) {
                 errors.add("productId is required");
             }
+            if (item.getTitle() == null || item.getTitle().isBlank()) {
+                errors.add("title is required");
+            }
             if (item.getQuantity() < 1) {
                 errors.add("quantity must be >= 1");
             }

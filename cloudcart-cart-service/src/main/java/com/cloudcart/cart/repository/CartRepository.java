@@ -5,8 +5,8 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.*;
 import java.net.URI;
-
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class CartRepository {
 
@@ -26,6 +26,9 @@ public class CartRepository {
         Map<String, AttributeValue> attributes = new HashMap<>();
         attributes.put("userId", AttributeValue.fromS(item.getUserId()));
         attributes.put("productId", AttributeValue.fromS(item.getProductId()));
+        if (item.getTitle() != null) {
+            attributes.put("title", AttributeValue.fromS(item.getTitle()));
+        }
         attributes.put("quantity", AttributeValue.fromN(String.valueOf(item.getQuantity())));
         attributes.put("price", AttributeValue.fromN(String.valueOf(item.getPrice())));
         attributes.put("addedAt", AttributeValue.fromS(item.getAddedAt()));
@@ -54,6 +57,9 @@ public class CartRepository {
             CartItem item = new CartItem();
             item.setUserId(row.get("userId").s());
             item.setProductId(row.get("productId").s());
+            if (row.containsKey("title")) {
+                item.setTitle(row.get("title").s());
+            }
             item.setQuantity(Integer.parseInt(row.get("quantity").n()));
             item.setPrice(Double.parseDouble(row.get("price").n()));
             item.setAddedAt(row.get("addedAt").s());
@@ -89,5 +95,38 @@ public class CartRepository {
                 .build();
 
         dynamoDbClient.updateItem(request);
+    }
+
+    public void clearCart(String userId) {
+        Map<String, AttributeValue> keyCond = Map.of(":uid", AttributeValue.fromS(userId));
+        QueryRequest query = QueryRequest.builder()
+                .tableName(tableName)
+                .keyConditionExpression("userId = :uid")
+                .projectionExpression("productId")
+                .expressionAttributeValues(keyCond)
+                .build();
+        QueryResponse result = dynamoDbClient.query(query);
+        List<Map<String, AttributeValue>> allKeys = result.items().stream()
+                .map(row -> {
+                    Map<String, AttributeValue> k = new HashMap<>();
+                    k.put("userId", AttributeValue.fromS(userId));
+                    k.put("productId", row.get("productId"));
+                    return k;
+                })
+                .collect(Collectors.toList());
+
+        // BatchWriteItem allows at most 25 requests per call
+        int batchSize = 25;
+        for (int i = 0; i < allKeys.size(); i += batchSize) {
+            List<Map<String, AttributeValue>> batch = allKeys.subList(i, Math.min(i + batchSize, allKeys.size()));
+            List<WriteRequest> writeRequests = batch.stream()
+                    .map(k -> WriteRequest.builder()
+                            .deleteRequest(DeleteRequest.builder().key(k).build())
+                            .build())
+                    .collect(Collectors.toList());
+            dynamoDbClient.batchWriteItem(BatchWriteItemRequest.builder()
+                    .requestItems(Map.of(tableName, writeRequests))
+                    .build());
+        }
     }
 }

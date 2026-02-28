@@ -49,7 +49,7 @@ export default function CartItemRow({ item, onUpdate }: CartItemRowProps) {
   return (
     <div className="flex items-center justify-between py-4 border-b border-gray-100 last:border-0">
       <div className="flex-1 min-w-0">
-        <p className="font-medium text-gray-800 truncate">{item.productId}</p>
+        <p className="font-medium text-gray-800 truncate">{item.title || item.productId}</p>
         <p className="text-xs text-gray-400 mt-0.5">Added {addedDate}</p>
       </div>
 

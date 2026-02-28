@@ -3,6 +3,7 @@ package com.cloudcart.cart.model;
 public class CartItem {
     private String userId;
     private String productId;
+    private String title;
     private int quantity;
     private double price;
     private String addedAt;
@@ -12,6 +13,9 @@ public class CartItem {
 
     public String getProductId() { return productId; }
     public void setProductId(String productId) { this.productId = productId; }
+
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
 
     public int getQuantity() { return quantity; }
     public void setQuantity(int quantity) { this.quantity = quantity; }

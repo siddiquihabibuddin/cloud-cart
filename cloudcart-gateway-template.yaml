@@ -134,6 +134,14 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
 
+  ClearCartPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-cart-ClearCartFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
   PlaceOrderPermissionDev:
     Type: AWS::Lambda::Permission
     Properties:
@@ -272,6 +280,20 @@ Resources:
           - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
           - Fn: !ImportValue cloudcart-cart-UpdateQuantityFunctionArn
 
+  DeleteCartUserMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref CartUserIdResourceDev
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-cart-ClearCartFunctionArn
+
   ### Methods — Orders (API key required) ###
   PostOrderMethodDev:
     Type: AWS::ApiGateway::Method
@@ -330,6 +352,7 @@ Resources:
       - GetCartMethodDev
       - DeleteCartMethodDev
       - PatchCartMethodDev
+      - DeleteCartUserMethodDev
       - PostOrderMethodDev
       - ListOrdersMethodDev
       - GetOrderMethodDev

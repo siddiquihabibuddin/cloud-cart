@@ -3,6 +3,7 @@ import { cartApi } from "./api";
 export type CartItem = {
   userId: string;
   productId: string;
+  title: string;
   quantity: number;
   price: number;
   addedAt: string;
@@ -20,10 +21,15 @@ export async function getCart(userId: string): Promise<CartItem[]> {
 export async function addToCart(item: {
   userId: string;
   productId: string;
+  title: string;
   quantity: number;
   price: number;
 }): Promise<void> {
   await cartApi.post("/cart", item);
+}
+
+export async function clearCart(userId: string): Promise<void> {
+  await cartApi.delete(`/cart/${userId}`);
 }
 
 export async function updateQty(

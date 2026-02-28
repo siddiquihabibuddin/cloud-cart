@@ -28,6 +28,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -42,7 +44,9 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Orders");
     private static final SqsClient SQS_CLIENT;
     private static final DynamoDbClient DYNAMO_CLIENT;
-    private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
     private static final String QUEUE_URL = System.getenv("ORDER_QUEUE_URL");
     private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
     private static final String IDEMPOTENCY_TABLE = System.getenv("IDEMPOTENCY_TABLE");
@@ -162,6 +166,11 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
                                     "reason", "insufficient stock"))));
                     METRICS.count("StockInsufficient");
                     return response(409, errorBody);
+                } else if (statusCode == 503) {
+                    for (OrderItem r : reserved) {
+                        callReleaseStock(r.getProductId(), r.getQuantity(), logger);
+                    }
+                    return response(503, "{\"error\":\"Product service unavailable, please retry\"}");
                 } else if (statusCode != 200) {
                     for (OrderItem r : reserved) {
                         callReleaseStock(r.getProductId(), r.getQuantity(), logger);
@@ -245,10 +254,14 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(PRODUCTS_API_URL + "/products/" + productId + "/stock"))
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(10))
                     .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
             return resp.statusCode();
+        } catch (HttpTimeoutException e) {
+            logger.error("Timeout calling reserve stock", Map.of("productId", productId));
+            return 503;
         } catch (Exception e) {
             logger.error("Failed to call reserve stock", Map.of(
                     "productId", productId, "error", String.valueOf(e.getMessage())));
@@ -262,10 +275,14 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(PRODUCTS_API_URL + "/products/" + productId + "/stock"))
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(10))
                     .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
             return resp.statusCode();
+        } catch (HttpTimeoutException e) {
+            logger.error("Timeout calling release stock", Map.of("productId", productId));
+            return 503;
         } catch (Exception e) {
             logger.error("Failed to call release stock", Map.of(
                     "productId", productId, "error", String.valueOf(e.getMessage())));
