@@ -129,7 +129,7 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 ![Product Listing](screenshots/product-listing.png)
 
 ### Cart
-![Cart](screenshots/cart.png)
+![Cart](screenshots/cart.png?raw=true)
 
 ### Checkout
 ![Checkout](screenshots/checkout.png?raw=true)
