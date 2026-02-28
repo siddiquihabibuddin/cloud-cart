@@ -47,6 +47,7 @@ Resources:
                   - dynamodb:DeleteItem
                   - dynamodb:Scan
                   - dynamodb:Query
+                  - dynamodb:BatchWriteItem
                 Resource: !GetAtt CartTableDev.Arn
 
   ### Lambda Functions ###

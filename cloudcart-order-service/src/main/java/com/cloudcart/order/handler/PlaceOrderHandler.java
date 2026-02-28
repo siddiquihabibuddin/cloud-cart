@@ -76,6 +76,10 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
         Map<String, Object> headers = (Map<String, Object>) input.get("headers");
         JsonLogger logger = JsonLogger.fromHeaders("order-service", headers);
 
+        // Declare idempotencyKey outside the try block so the catch clause can
+        // reference it when marking the idempotency record FAILED.
+        String idempotencyKey = null;
+
         try {
             // --- Input parsing ---
             String body = (String) input.get("body");
@@ -114,7 +118,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             // --- Idempotency: atomically claim the key before doing any work ---
             // Uses conditional PutItem (attribute_not_exists) so only one concurrent
             // request can win the slot — eliminates the GetItem→PutItem TOCTOU race.
-            String idempotencyKey = extractHeader(headers, "Idempotency-Key");
+            idempotencyKey = extractHeader(headers, "Idempotency-Key");
             if (idempotencyKey != null && IDEMPOTENCY_TABLE != null) {
                 Map<String, AttributeValue> claimItem = new HashMap<>();
                 claimItem.put("idempotencyKey", AttributeValue.fromS(idempotencyKey));
@@ -136,15 +140,35 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
                             .build());
                     if (existing.hasItem() && !existing.item().isEmpty()) {
                         Map<String, AttributeValue> stored = existing.item();
-                        if ("COMPLETED".equals(stored.get("status").s())) {
+                        String storedStatus = stored.get("status").s();
+                        if ("COMPLETED".equals(storedStatus)) {
                             int cachedStatus = Integer.parseInt(stored.get("statusCode").n());
                             String cachedBody = stored.get("responseBody").s();
                             logger.info("Idempotent response returned",
                                     Map.of("idempotencyKey", idempotencyKey));
                             return response(cachedStatus, cachedBody);
                         }
+                        if ("IN_PROGRESS".equals(storedStatus)) {
+                            // A concurrent request is still running — tell the client to back off
+                            return response(409, "{\"error\":\"A request with this Idempotency-Key is already in progress\"}");
+                        }
+                        // FAILED: previous attempt failed after claiming the slot.
+                        // Delete the stale record so the client can retry with the same key.
+                        try {
+                            DYNAMO_CLIENT.deleteItem(software.amazon.awssdk.services.dynamodb.model.DeleteItemRequest.builder()
+                                    .tableName(IDEMPOTENCY_TABLE)
+                                    .key(Map.of("idempotencyKey", AttributeValue.fromS(idempotencyKey)))
+                                    .build());
+                            logger.info("Stale FAILED idempotency record cleared; client may retry",
+                                    Map.of("idempotencyKey", idempotencyKey));
+                        } catch (Exception deleteEx) {
+                            logger.error("Failed to delete FAILED idempotency record",
+                                    Map.of("idempotencyKey", idempotencyKey,
+                                           "error", String.valueOf(deleteEx.getMessage())));
+                        }
+                        return response(503, "{\"error\":\"Previous attempt failed, please retry with the same Idempotency-Key\"}");
                     }
-                    // IN_PROGRESS means a concurrent request is still running
+                    // Record vanished (TTL race) — tell client to retry
                     return response(409, "{\"error\":\"A request with this Idempotency-Key is already in progress\"}");
                 }
             }
@@ -244,6 +268,27 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
         } catch (Exception e) {
             logger.error("Order placement failed", Map.of("error", String.valueOf(e.getMessage())));
             METRICS.count("OrderFailed");
+            // Mark idempotency record FAILED so the client can retry with the same key.
+            // Without this the slot stays IN_PROGRESS until the 24h TTL expires.
+            if (idempotencyKey != null && IDEMPOTENCY_TABLE != null) {
+                try {
+                    DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                            .tableName(IDEMPOTENCY_TABLE)
+                            .key(Map.of("idempotencyKey", AttributeValue.fromS(idempotencyKey)))
+                            .updateExpression("SET #st = :failed")
+                            .expressionAttributeNames(Map.of("#st", "status"))
+                            .expressionAttributeValues(Map.of(
+                                    ":failed", AttributeValue.fromS("FAILED")
+                            ))
+                            .build());
+                    logger.info("Idempotency record marked FAILED",
+                            Map.of("idempotencyKey", idempotencyKey));
+                } catch (Exception idempotencyEx) {
+                    logger.error("Failed to mark idempotency record FAILED",
+                            Map.of("idempotencyKey", idempotencyKey,
+                                   "error", String.valueOf(idempotencyEx.getMessage())));
+                }
+            }
             return response(500, "{\"error\":\"Failed to place order\"}");
         }
     }

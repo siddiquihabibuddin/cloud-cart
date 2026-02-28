@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getCart, clearCart, CartItem } from "@/lib/cart";
 import { useCart } from "@/lib/CartContext";
@@ -22,6 +22,18 @@ export default function CheckoutPage() {
   const [placing, setPlacing] = useState(false);
   const [orderStatus, setOrderStatus] = useState<OrderStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Cancellation flag: set to true on unmount so the polling loop exits
+  // promptly and doesn't call setOrderStatus on an unmounted component.
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    // Reset on every mount — required because React StrictMode unmounts and
+    // remounts in development, which would leave the ref permanently true.
+    cancelledRef.current = false;
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     setUserId(localStorage.getItem("cc_user_id"));
@@ -52,10 +64,19 @@ export default function CheckoutPage() {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const delay = Math.min(2000 * Math.pow(1.3, attempt), 5000);
       await new Promise((r) => setTimeout(r, delay));
+      if (cancelledRef.current) return;
       try {
         const order = await getOrder(orderId, uid);
+        if (cancelledRef.current) return;
         setOrderStatus({ orderId, status: order.status as OrderStatus["status"] });
-        if (order.status !== "PENDING") return;
+        if (order.status !== "PENDING") {
+          // Only clear the cart once payment is confirmed PAID.
+          // On FAILED the cart is preserved so the user can retry.
+          if (order.status === "PAID") {
+            clearCart(uid).then(() => refreshCartCount()).catch(() => refreshCartCount());
+          }
+          return;
+        }
       } catch {
         // keep polling
       }
@@ -79,7 +100,6 @@ export default function CheckoutPage() {
 
       const result = await placeOrder(userId, orderItems);
       setOrderStatus({ orderId: result.orderId, status: "PENDING" });
-      clearCart(userId).then(() => refreshCartCount()).catch(() => refreshCartCount());
       await pollOrderStatus(result.orderId, userId);
     } catch {
       setError("Failed to place order. Please try again.");
