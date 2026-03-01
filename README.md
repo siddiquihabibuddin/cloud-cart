@@ -200,6 +200,9 @@ PENDING → FAILED
 ### Order Placed
 ![Order Placed](screenshots/place-order.png)
 
+### My Orders
+![My Orders](screenshots/orders.png)
+
 ## Prerequisites
 
 - Docker
