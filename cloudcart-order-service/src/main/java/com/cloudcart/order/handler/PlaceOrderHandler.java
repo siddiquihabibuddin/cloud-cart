@@ -6,6 +6,7 @@ import com.cloudcart.order.model.Order;
 import com.cloudcart.order.model.OrderItem;
 import com.cloudcart.order.model.OrderPlacedEvent;
 import com.cloudcart.order.repository.OrderRepository;
+import com.cloudcart.order.repository.SagaRepository;
 import com.cloudcart.order.util.JsonLogger;
 import com.cloudcart.order.util.MetricsEmitter;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -50,6 +51,8 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
     private static final String QUEUE_URL = System.getenv("ORDER_QUEUE_URL");
     private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
     private static final String IDEMPOTENCY_TABLE = System.getenv("IDEMPOTENCY_TABLE");
+    private static final String SAGA_TABLE = System.getenv("SAGA_TABLE");
+    private static final SagaRepository SAGA_REPO;
 
     static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
@@ -68,6 +71,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             dynamoBuilder.endpointOverride(URI.create(endpointUrl));
         }
         DYNAMO_CLIENT = dynamoBuilder.build();
+        SAGA_REPO = new SagaRepository(DYNAMO_CLIENT, SAGA_TABLE);
     }
 
     @Override
@@ -237,6 +241,16 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
 
             // --- Persist the order ---
             REPOSITORY.saveOrder(order);
+
+            if (SAGA_TABLE != null) {
+                try {
+                    SAGA_REPO.createSaga(orderId, userId, reserved);
+                } catch (Exception sagaEx) {
+                    // Non-fatal: order IS saved. Log and continue.
+                    logger.error("Failed to create saga record",
+                            Map.of("orderId", orderId, "error", String.valueOf(sagaEx.getMessage())));
+                }
+            }
 
             logger.info("Order placed", Map.of("orderId", orderId, "userId", userId));
             METRICS.count("OrderPlaced");

@@ -3,6 +3,22 @@ Description: '[DEV] Order service - Lambda, DynamoDB, SQS, REST API Gateway'
 
 Resources:
 
+  ### DynamoDB Table for Saga ###
+  SagaTableDev:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: SagaTableDev
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
   ### DynamoDB Table for Orders ###
   OrdersTableDev:
     Type: AWS::DynamoDB::Table
@@ -42,6 +58,11 @@ Resources:
         Enabled: true
 
   ### Dead Letter Queues ###
+  StockCompensationDLQDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: StockCompensationDLQDev
+
   OrderPlacedDLQDev:
     Type: AWS::SQS::Queue
     Properties:
@@ -51,6 +72,16 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: PaymentSuccessDLQDev
+
+  ### SQS Queue for Stock Compensation ###
+  StockCompensationQueueDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: StockCompensationQueueDev
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt StockCompensationDLQDev.Arn
+        maxReceiveCount: 3
 
   ### SQS Queue for Order Events ###
   OrderPlacedQueueDev:
@@ -107,6 +138,23 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
 
+  StockCompensationDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: cloudcart-StockCompensationDLQ-MessagesVisible
+      AlarmDescription: Alert when messages appear in StockCompensationDLQ
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt StockCompensationDLQDev.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
   ### IAM Role for Order Lambdas ###
   OrderLambdaRoleDev:
     Type: AWS::IAM::Role
@@ -146,6 +194,43 @@ Resources:
                 Action:
                   - sqs:SendMessage
                 Resource: !GetAtt OrderPlacedQueueDev.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt SagaTableDev.Arn
+
+  ### IAM Role for Compensation Lambda ###
+  CompensationLambdaRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompensationLambdaRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CompensationSQSDynamoAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt StockCompensationQueueDev.Arn
+                  - !GetAtt StockCompensationDLQDev.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt SagaTableDev.Arn
 
   ### Lambda Functions ###
   PlaceOrderFunctionDev:
@@ -166,6 +251,7 @@ Resources:
           ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
           PRODUCTS_API_URL: !ImportValue cloudcart-products-ProductApiInternalUrl
           IDEMPOTENCY_TABLE: !Ref IdempotencyTableDev
+          SAGA_TABLE: !Ref SagaTableDev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   GetOrderFunctionDev:
@@ -203,6 +289,35 @@ Resources:
           ORDERS_TABLE: !Ref OrdersTableDev
           ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ProcessCompensationFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ProcessCompensationFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.order.handler.ProcessCompensationHandler::handleRequest
+      Role: !GetAtt CompensationLambdaRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: order-service-1.0.0.jar
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          SAGA_TABLE: !Ref SagaTableDev
+          PRODUCTS_API_URL: !ImportValue cloudcart-products-ProductApiInternalUrl
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### SQS Event Source Mapping for Compensation ###
+  CompensationQueueEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt StockCompensationQueueDev.Arn
+      FunctionName: !GetAtt ProcessCompensationFunctionDev.Arn
+      BatchSize: 1
+      Enabled: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
 
   ### Lambda Permissions for API Gateway ###
   PlaceOrderInvokePermissionDev:
@@ -399,3 +514,27 @@ Outputs:
     Value: !Ref OrderApiKeyDev
     Export:
       Name: cloudcart-order-OrderApiKeyId
+
+  SagaTableName:
+    Description: "DynamoDB table name for saga state"
+    Value: !Ref SagaTableDev
+    Export:
+      Name: cloudcart-order-SagaTableName
+
+  SagaTableArn:
+    Description: "ARN of the saga DynamoDB table"
+    Value: !GetAtt SagaTableDev.Arn
+    Export:
+      Name: cloudcart-order-SagaTableArn
+
+  StockCompensationQueueUrl:
+    Description: "URL of the stock compensation SQS queue"
+    Value: !Ref StockCompensationQueueDev
+    Export:
+      Name: cloudcart-order-StockCompensationQueueUrl
+
+  StockCompensationQueueArn:
+    Description: "ARN of the stock compensation SQS queue"
+    Value: !GetAtt StockCompensationQueueDev.Arn
+    Export:
+      Name: cloudcart-order-StockCompensationQueueArn

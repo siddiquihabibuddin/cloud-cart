@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 public class ProcessShipmentHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
@@ -28,6 +27,7 @@ public class ProcessShipmentHandler implements RequestHandler<Map<String, Object
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Shipments");
     private static final DynamoDbClient DYNAMO_CLIENT;
     private static final String ORDERS_TABLE = System.getenv("ORDERS_TABLE");
+    private static final String SAGA_TABLE = System.getenv("SAGA_TABLE");
 
     static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
@@ -60,25 +60,19 @@ public class ProcessShipmentHandler implements RequestHandler<Map<String, Object
                 String body = (String) record.get("body");
                 PaymentSuccessEvent event = MAPPER.readValue(body, PaymentSuccessEvent.class);
 
-                String trackingId = "TRK-" + UUID.randomUUID().toString()
-                        .replace("-", "").substring(0, 8).toUpperCase();
-                String shippedAt = Instant.now().toString();
-
                 // Condition: order must still be PAID.
-                // - If already SHIPPED (duplicate delivery) → ConditionalCheckFailedException → skip silently (idempotent)
+                // - If already SHIPMENT_CREATED (duplicate delivery) → ConditionalCheckFailedException → skip silently (idempotent)
                 // - If in any other state → also skip; this message shouldn't be here
                 try {
                     DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
                             .tableName(ORDERS_TABLE)
                             .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
-                            .updateExpression("SET #s = :status, trackingId = :tid, shippedAt = :ts")
-                            .conditionExpression("#s = :paid")
+                            .updateExpression("SET #s = :status")
+                            .conditionExpression("attribute_exists(orderId) AND #s = :paid")
                             .expressionAttributeNames(Map.of("#s", "status"))
                             .expressionAttributeValues(Map.of(
-                                    ":status", AttributeValue.fromS("SHIPPED"),
-                                    ":tid", AttributeValue.fromS(trackingId),
-                                    ":ts", AttributeValue.fromS(shippedAt),
-                                    ":paid", AttributeValue.fromS("PAID")
+                                    ":status", AttributeValue.fromS("SHIPMENT_CREATED"),
+                                    ":paid",   AttributeValue.fromS("PAID")
                             ))
                             .build());
                 } catch (ConditionalCheckFailedException condEx) {
@@ -87,8 +81,29 @@ public class ProcessShipmentHandler implements RequestHandler<Map<String, Object
                     continue;
                 }
 
-                logger.info("Shipment initiated",
-                        Map.of("orderId", event.getOrderId(), "trackingId", trackingId));
+                // Update saga: STARTED → COMPLETED
+                if (SAGA_TABLE != null) {
+                    try {
+                        DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                                .tableName(SAGA_TABLE)
+                                .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
+                                .updateExpression("SET sagaStatus = :s, currentStep = :step, updatedAt = :now")
+                                .conditionExpression("sagaStatus = :started")
+                                .expressionAttributeValues(Map.of(
+                                        ":s",       AttributeValue.fromS("COMPLETED"),
+                                        ":step",    AttributeValue.fromS("SHIPMENT_CREATED"),
+                                        ":started", AttributeValue.fromS("STARTED"),
+                                        ":now",     AttributeValue.fromS(Instant.now().toString())
+                                ))
+                                .build());
+                    } catch (Exception sagaEx) {
+                        logger.error("Failed to update saga on shipment", Map.of(
+                                "orderId", event.getOrderId(),
+                                "error", String.valueOf(sagaEx.getMessage())));
+                    }
+                }
+
+                logger.info("Shipment initiated", Map.of("orderId", event.getOrderId()));
                 METRICS.count("ShipmentInitiated");
 
             } catch (Exception e) {

@@ -38,6 +38,10 @@ Resources:
                 Action:
                   - dynamodb:UpdateItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !ImportValue cloudcart-order-SagaTableArn
 
   ### Shipment Lambda Function ###
   ProcessShipmentFunctionDev:
@@ -55,6 +59,7 @@ Resources:
       Environment:
         Variables:
           ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
+          SAGA_TABLE: !ImportValue cloudcart-order-SagaTableName
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   ### SQS Event Source Mapping ###

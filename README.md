@@ -20,38 +20,50 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.
     │  Lambda + DDB   │  │  Lambda │  │  Lambda + DDB    │
     └─────────────────┘  │  + DDB  │  └─────────────────┘
                          └─────────┘
+```
 
-    ┌─────────────────────────────────────────────────┐
-    │                  order-service                  │
-    │  validate → idempotency check                   │
-    │  → PATCH /products/{id}/stock (reserve) × N    │
-    │    (rollback via release on any failure)        │
-    │  → DynamoDB PENDING → OrderPlacedEvent → SQS   │
-    └──────────────────────────┬──────────────────────┘
-                               │ OrderPlacedQueueDev (DLQ: OrderPlacedDLQDev)
-                    ┌──────────▼──────────┐
-                    │   payment-service   │
-                    │  80% PAID / 20% FAILED           │
-                    │  → UpdateItem DynamoDB            │
-                    │  If PAID → PaymentSuccessEvent   │
-                    └──────────┬──────────┘
-                               │ PaymentSuccessQueueDev (DLQ: PaymentSuccessDLQDev)
-                    ┌──────────▼──────────┐
-                    │  shipment-service   │
-                    │  generate trackingId             │
-                    │  → UpdateItem SHIPPED            │
-                    └─────────────────────┘
+### Order Saga (Choreography)
+
+```
+order-service
+  validate → idempotency check
+  → reserve stock via PATCH /products/{id}/stock × N
+  → DynamoDB PENDING
+  → SagaTableDev (STARTED / STOCK_RESERVED)
+  → OrderPlacedEvent → OrderPlacedQueueDev
+          │ (DLQ: OrderPlacedDLQDev)
+          ▼
+  payment-service   80% PAID / 20% FAILED
+  → UpdateItem OrdersTableDev (PENDING → PAID or FAILED)
+  If PAID:
+    → SagaTableDev (STARTED / PAYMENT_COMPLETED)
+    → PaymentSuccessEvent → PaymentSuccessQueueDev
+          │ (DLQ: PaymentSuccessDLQDev)
+          ▼
+    shipment-service
+    → UpdateItem OrdersTableDev (PAID → SHIPMENT_CREATED)
+    → SagaTableDev (COMPLETED / SHIPMENT_CREATED)
+
+  If FAILED:
+    → SagaTableDev (COMPENSATING / PAYMENT_FAILED)
+    → StockCompensationEvent → StockCompensationQueueDev
+          │ (DLQ: StockCompensationDLQDev)
+          ▼
+    compensation-service (ProcessCompensationFunctionDev)
+    → PATCH /products/{id}/stock {"release":N} × N
+    → SagaTableDev (COMPENSATION_COMPLETED / STOCK_RELEASED)
 ```
 
 ## Services
 
-| Service | Runtime | Trigger | Table |
+| Service | Runtime | Trigger | Tables |
 |---|---|---|---|
 | `cloudcart-product-catalog-java` | Java 21 Lambda | REST API | `ProductsTableDev` |
 | `cloudcart-cart-service` | Java 21 Lambda | REST API | `CartTableDev` |
-| `cloudcart-order-service` | Java 21 Lambda | REST API | `OrdersTableDev`, `IdempotencyTableDev` |
-| `cloudcart-payment-service` | Java 21 Lambda | SQS (`OrderPlacedQueueDev`) | `OrdersTableDev` |
-| `cloudcart-shipment-service` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev` |
+| `cloudcart-order-service` | Java 21 Lambda | REST API | `OrdersTableDev`, `IdempotencyTableDev`, `SagaTableDev` |
+| `cloudcart-payment-service` | Java 21 Lambda | SQS (`OrderPlacedQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
+| `cloudcart-shipment-service` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
+| `ProcessCompensationFunctionDev` | Java 21 Lambda | SQS (`StockCompensationQueueDev`) | `SagaTableDev` |
 | `cloudcart-frontend` | Next.js | — | — |
 
 ## API Routes
@@ -78,7 +90,7 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/orders` | Place order — atomic stock reservation, returns 409 if insufficient |
-| `GET` | `/orders/{orderId}?userId=X` | Get order — `userId` required; returns 403 if it doesn't match the order owner (includes `trackingId` and `shippedAt` once shipped) |
+| `GET` | `/orders/{orderId}?userId=X` | Get order — `userId` required; returns 403 if it doesn't match the order owner |
 | `GET` | `/orders?userId=X` | List user's orders — queries `userId-index` GSI |
 
 `POST /orders` accepts an optional `Idempotency-Key` header — repeated requests with the same key return the cached response for 24 hours.
@@ -89,39 +101,57 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
 2. "Place Order" sends `POST /orders` with `x-api-key` header
    - Input is validated (userId required, quantity ≥ 1, price ≥ 0)
    - Idempotency key is checked against `IdempotencyTableDev` (24h TTL)
-   - Stock is reserved via sequential `PATCH /products/{id}/stock {"reserve":N}` calls to the product catalog API; on any 409 or error, already-reserved items are released before returning the error
+   - Stock is reserved via sequential `PATCH /products/{id}/stock {"reserve":N}` calls; on any 409 or error, already-reserved items are released before returning the error
    - If any item is out of stock → **409** `{"error":"Insufficient stock","items":[...]}`
-   - Order saved as **PENDING**, `OrderPlacedEvent` published to `OrderPlacedQueueDev`
-   - Successful response is cached in `IdempotencyTableDev`
+   - Order saved as **PENDING**, saga record created in `SagaTableDev` (`STARTED / STOCK_RESERVED`), `OrderPlacedEvent` published to `OrderPlacedQueueDev`
 3. Payment Lambda consumes the event → **80% PAID / 20% FAILED**
    - Uses conditional `UpdateItem` (`attribute_exists(orderId) AND status = PENDING`) — idempotent on retry
-   - If FAILED → releases reserved stock via `PATCH /products/{id}/stock {"release":N}` for each item
-   - Failed records are reported via `ReportBatchItemFailures` — retried up to 3× before landing in `OrderPlacedDLQDev`
-   - If PAID → publishes `PaymentSuccessEvent` to `PaymentSuccessQueueDev`
-4. Shipment Lambda consumes the payment event → generates `TRK-XXXXXXXX` tracking ID
-   - Uses conditional `UpdateItem` (`status = PAID`) — idempotent on retry; duplicate deliveries skip silently, preserving the original `trackingId`
-   - Order updated to **SHIPPED** with `trackingId` and `shippedAt`
+   - **If PAID** → saga updated (`STARTED / PAYMENT_COMPLETED`), `PaymentSuccessEvent` published to `PaymentSuccessQueueDev`
+   - **If FAILED** → saga updated (`COMPENSATING / PAYMENT_FAILED`), `StockCompensationEvent` published to `StockCompensationQueueDev` for reliable async stock release
+   - Failed records reported via `ReportBatchItemFailures` — retried up to 3× before landing in `OrderPlacedDLQDev`
+4. Shipment Lambda consumes the payment event
+   - Conditional `UpdateItem` (`status = PAID → SHIPMENT_CREATED`) — idempotent on retry
+   - Saga updated to `COMPLETED / SHIPMENT_CREATED`
    - Failed records retry up to 3× before landing in `PaymentSuccessDLQDev`
-5. Checkout page polls `GET /orders/{id}` every 2s — status progresses PENDING → PAID → SHIPPED
+5. Compensation Lambda consumes `StockCompensationEvent` (batch size 1)
+   - Calls `PATCH /products/{id}/stock {"release":N}` for each item sequentially
+   - On any HTTP failure → message returned to `StockCompensationQueueDev` for retry (up to 3×, then `StockCompensationDLQDev`)
+   - On full success → saga updated to `COMPENSATION_COMPLETED / STOCK_RELEASED`
+6. Checkout page polls `GET /orders/{id}` every 2s — status progresses PENDING → PAID → SHIPMENT_CREATED
+
+## Saga State Machine
+
+```
+PlaceOrderHandler        → STARTED  / STOCK_RESERVED
+ProcessPaymentHandler    → STARTED  / PAYMENT_COMPLETED   (PAID path)
+                         → COMPENSATING / PAYMENT_FAILED  (FAILED path)
+ProcessShipmentHandler   → COMPLETED / SHIPMENT_CREATED
+ProcessCompensationHandler → COMPENSATION_COMPLETED / STOCK_RELEASED
+                           (or stays COMPENSATING → DLQ after 3 retries)
+```
+
+`SagaTableDev` records carry a 7-day TTL (`expiresAt`) and are keyed by `orderId`. All saga updates use conditional writes (`sagaStatus = :expected`) so concurrent retries are idempotent.
 
 ## Reliability Features
 
 | Feature | Details |
 |---|---|
+| **Choreography Saga** | Full saga state machine in `SagaTableDev`; each service writes its own step; no orchestrator |
+| **SQS-based compensation** | Payment failure publishes to `StockCompensationQueueDev` instead of a fire-and-forget HTTP call; the compensation Lambda retries up to 3× with DLQ fallback |
 | **Idempotency** | `POST /orders` deduplicates on `Idempotency-Key` header; results cached 24h in DynamoDB |
-| **Stock reservation via API** | Order service calls `PATCH /products/{id}/stock {"reserve":N}` on the product catalog API; on failure a compensating `{"release":N}` call rolls back already-reserved items. Services own their own data — no cross-service DynamoDB access. |
-| **Dead Letter Queues** | `OrderPlacedDLQDev` and `PaymentSuccessDLQDev`; messages moved after 3 failed delivery attempts |
-| **Order ownership check** | `GET /orders/{orderId}` requires `?userId=X`; returns 403 if it doesn't match the order's owner |
-| **GSI Query for order listing** | `GET /orders?userId=X` queries the `userId-index` GSI — O(results), not O(table) |
-| **Shipment idempotency** | Shipment `UpdateItem` conditions on `status = PAID`; duplicate SQS deliveries skip silently, preserving the original `trackingId` |
-| **Batch item failures** | Payment and shipment Lambdas return `batchItemFailures` so only failed records are retried |
+| **Stock reservation** | `PATCH /products/{id}/stock {"reserve":N}` — conditional decrement; on order-placement failure, already-reserved items are released synchronously |
+| **Dead Letter Queues** | `OrderPlacedDLQDev`, `PaymentSuccessDLQDev`, `StockCompensationDLQDev` — messages moved after 3 failed delivery attempts |
+| **CloudWatch alarms** | `ApproximateNumberOfMessagesVisible > 0` on all three DLQs |
+| **Conditional DynamoDB writes** | All status transitions use condition expressions; stale retries skip silently |
+| **Order ownership check** | `GET /orders/{orderId}` requires `?userId=X`; returns 403 if mismatched |
+| **GSI query for order listing** | `GET /orders?userId=X` queries `userId-index` GSI — O(results), not O(table) |
+| **Batch item failures** | Payment, shipment, and compensation Lambdas return `batchItemFailures` so only failed records are retried |
 | **API key auth** | All order endpoints require `x-api-key: cloudcart-dev-key-2024` |
 | **Input validation** | 400s for blank fields, quantity < 1, negative prices, non-numeric pagination params |
 | **SDK retry** | All DynamoDB/SQS clients configured with 3 retries + exponential backoff |
 | **Static SDK clients** | Clients initialised once per Lambda container; reused across warm invocations |
 | **Structured logging** | JSON logs to stdout with `timestamp`, `level`, `service`, `correlationId` fields |
-| **CloudWatch metrics** | EMF-format metrics emitted to stdout: `OrderPlaced`, `StockInsufficient`, `PaymentSucceeded`, `PaymentFailed`, `ShipmentInitiated`, and error counters |
-| **CloudWatch alarms** | `ApproximateNumberOfMessagesVisible > 0` on both DLQs |
+| **CloudWatch metrics** | EMF-format metrics: `OrderPlaced`, `StockInsufficient`, `PaymentSucceeded`, `PaymentFailed`, `ShipmentInitiated`, `CompensationCompleted`, `SagaUpdateFailed`, and error counters |
 
 ## Screenshots
 
@@ -207,6 +237,20 @@ awslocal lambda update-function-code \
   --function-name <FunctionName> \
   --s3-bucket sid-mysourcecode \
   --s3-key <jar-name>
+```
+
+## Verifying the Saga
+
+```bash
+# Scan saga state for all orders
+awslocal dynamodb scan --table-name SagaTableDev --output table
+
+# Check all DLQ alarms
+awslocal cloudwatch describe-alarms \
+  --alarm-names \
+    cloudcart-OrderPlacedDLQ-MessagesVisible \
+    cloudcart-PaymentSuccessDLQ-MessagesVisible \
+    cloudcart-StockCompensationDLQ-MessagesVisible
 ```
 
 ## Tech Stack

@@ -42,6 +42,14 @@ Resources:
                 Action:
                   - dynamodb:UpdateItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !ImportValue cloudcart-order-SagaTableArn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !ImportValue cloudcart-order-StockCompensationQueueArn
 
   ### Payment Lambda Function ###
   ProcessPaymentFunctionDev:
@@ -60,7 +68,8 @@ Resources:
         Variables:
           ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
           PAYMENT_SUCCESS_QUEUE_URL: !ImportValue cloudcart-order-PaymentSuccessQueueUrl
-          PRODUCTS_API_URL: !ImportValue cloudcart-products-ProductApiInternalUrl
+          SAGA_TABLE: !ImportValue cloudcart-order-SagaTableName
+          STOCK_COMPENSATION_QUEUE_URL: !ImportValue cloudcart-order-StockCompensationQueueUrl
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   ### SQS Event Source Mapping ###

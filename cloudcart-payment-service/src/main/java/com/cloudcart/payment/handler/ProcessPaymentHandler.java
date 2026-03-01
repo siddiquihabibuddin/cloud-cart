@@ -21,11 +21,7 @@ import software.amazon.awssdk.services.sqs.SqsClientBuilder;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
-import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,12 +33,10 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Payments");
     private static final DynamoDbClient DYNAMO_CLIENT;
     private static final SqsClient SQS_CLIENT;
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .build();
     private static final String ORDERS_TABLE = System.getenv("ORDERS_TABLE");
     private static final String PAYMENT_SUCCESS_QUEUE_URL = System.getenv("PAYMENT_SUCCESS_QUEUE_URL");
-    private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
+    private static final String SAGA_TABLE = System.getenv("SAGA_TABLE");
+    private static final String STOCK_COMPENSATION_QUEUE_URL = System.getenv("STOCK_COMPENSATION_QUEUE_URL");
 
     static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
@@ -149,12 +143,70 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
                             }
                         }
                     }
+                    // Update saga: STARTED → PAYMENT_COMPLETED
+                    if (SAGA_TABLE != null) {
+                        try {
+                            DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                                    .tableName(SAGA_TABLE)
+                                    .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
+                                    .updateExpression("SET sagaStatus = :s, currentStep = :step, updatedAt = :now")
+                                    .conditionExpression("sagaStatus = :started")
+                                    .expressionAttributeValues(Map.of(
+                                            ":s",       AttributeValue.fromS("STARTED"),
+                                            ":step",    AttributeValue.fromS("PAYMENT_COMPLETED"),
+                                            ":started", AttributeValue.fromS("STARTED"),
+                                            ":now",     AttributeValue.fromS(Instant.now().toString())
+                                    ))
+                                    .build());
+                        } catch (Exception sagaEx) {
+                            logger.error("Failed to update saga on PAID", Map.of(
+                                    "orderId", event.getOrderId(),
+                                    "error", String.valueOf(sagaEx.getMessage())));
+                        }
+                    }
                 } else {
                     METRICS.count("PaymentFailed");
-                    // Release reserved stock so inventory is restored
-                    if (PRODUCTS_API_URL != null && event.getItems() != null) {
-                        for (com.cloudcart.payment.model.OrderItem item : event.getItems()) {
-                            callReleaseStock(item.getProductId(), item.getQuantity(), logger);
+                    // Publish stock compensation event to SQS for reliable, retryable stock release
+                    if (STOCK_COMPENSATION_QUEUE_URL != null && event.getItems() != null) {
+                        try {
+                            Map<String, Object> compensationEvent = new HashMap<>();
+                            compensationEvent.put("orderId", event.getOrderId());
+                            compensationEvent.put("userId", event.getUserId());
+                            compensationEvent.put("items", event.getItems());
+                            SQS_CLIENT.sendMessage(SendMessageRequest.builder()
+                                    .queueUrl(STOCK_COMPENSATION_QUEUE_URL)
+                                    .messageBody(MAPPER.writeValueAsString(compensationEvent))
+                                    .build());
+                            logger.info("Published StockCompensationEvent",
+                                    Map.of("orderId", event.getOrderId()));
+                        } catch (Exception sqsEx) {
+                            logger.error("Failed to publish StockCompensationEvent", Map.of(
+                                    "orderId", event.getOrderId(),
+                                    "error", String.valueOf(sqsEx.getMessage())));
+                            if (messageId != null) {
+                                failedItems.add(Map.of("itemIdentifier", messageId));
+                            }
+                        }
+                    }
+                    // Update saga: STARTED → COMPENSATING
+                    if (SAGA_TABLE != null) {
+                        try {
+                            DYNAMO_CLIENT.updateItem(UpdateItemRequest.builder()
+                                    .tableName(SAGA_TABLE)
+                                    .key(Map.of("orderId", AttributeValue.fromS(event.getOrderId())))
+                                    .updateExpression("SET sagaStatus = :s, currentStep = :step, updatedAt = :now")
+                                    .conditionExpression("sagaStatus = :started")
+                                    .expressionAttributeValues(Map.of(
+                                            ":s",       AttributeValue.fromS("COMPENSATING"),
+                                            ":step",    AttributeValue.fromS("PAYMENT_FAILED"),
+                                            ":started", AttributeValue.fromS("STARTED"),
+                                            ":now",     AttributeValue.fromS(Instant.now().toString())
+                                    ))
+                                    .build());
+                        } catch (Exception sagaEx) {
+                            logger.error("Failed to update saga on FAILED", Map.of(
+                                    "orderId", event.getOrderId(),
+                                    "error", String.valueOf(sagaEx.getMessage())));
                         }
                     }
                 }
@@ -171,24 +223,6 @@ public class ProcessPaymentHandler implements RequestHandler<Map<String, Object>
         }
 
         return buildBatchResponse(failedItems);
-    }
-
-    private void callReleaseStock(String productId, int qty, JsonLogger logger) {
-        try {
-            String body = MAPPER.writeValueAsString(Map.of("release", qty));
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(PRODUCTS_API_URL + "/products/" + productId + "/stock"))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(10))
-                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-            HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (HttpTimeoutException e) {
-            logger.error("Timeout releasing stock after payment failure", Map.of("productId", productId));
-        } catch (Exception e) {
-            logger.error("Failed to release stock after payment failure", Map.of(
-                    "productId", productId, "error", String.valueOf(e.getMessage())));
-        }
     }
 
     private Map<String, Object> buildBatchResponse(List<Map<String, String>> failedItems) {
