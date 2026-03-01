@@ -11,7 +11,7 @@ const POLLING_TIMEOUT_MSG =
 
 interface OrderStatus {
   orderId: string;
-  status: "PENDING" | "PAID" | "FAILED" | "TIMEOUT";
+  status: "PENDING" | "PAID" | "SHIPMENT_CREATED" | "FAILED" | "TIMEOUT";
 }
 
 export default function CheckoutPage() {
@@ -70,9 +70,9 @@ export default function CheckoutPage() {
         if (cancelledRef.current) return;
         setOrderStatus({ orderId, status: order.status as OrderStatus["status"] });
         if (order.status !== "PENDING") {
-          // Only clear the cart once payment is confirmed PAID.
+          // Clear the cart on any successful outcome (PAID or beyond).
           // On FAILED the cart is preserved so the user can retry.
-          if (order.status === "PAID") {
+          if (order.status === "PAID" || order.status === "SHIPMENT_CREATED") {
             clearCart(uid).then(() => refreshCartCount()).catch(() => refreshCartCount());
           }
           return;
@@ -126,13 +126,15 @@ export default function CheckoutPage() {
   if (orderStatus) {
     const isPending = orderStatus.status === "PENDING";
     const isPaid = orderStatus.status === "PAID";
+    const isShipmentCreated = orderStatus.status === "SHIPMENT_CREATED";
     const isTimeout = orderStatus.status === "TIMEOUT";
+    const isSuccess = isPaid || isShipmentCreated;
 
     return (
       <div className="max-w-lg mx-auto text-center py-16">
         <div
           className={`rounded-2xl p-10 border ${
-            isPaid
+            isSuccess
               ? "bg-green-50 border-green-200"
               : isPending || isTimeout
               ? "bg-yellow-50 border-yellow-200"
@@ -140,10 +142,18 @@ export default function CheckoutPage() {
           }`}
         >
           <div className="text-5xl mb-4">
-            {isPaid ? "✓" : isPending || isTimeout ? "⏳" : "✕"}
+            {isShipmentCreated
+              ? "📦"
+              : isPaid
+              ? "✓"
+              : isPending || isTimeout
+              ? "⏳"
+              : "✕"}
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">
-            {isPaid
+            {isShipmentCreated
+              ? "Shipment Created"
+              : isPaid
               ? "Payment Successful!"
               : isPending
               ? "Processing Payment…"
@@ -159,7 +169,7 @@ export default function CheckoutPage() {
             Status:{" "}
             <span
               className={`font-semibold ${
-                isPaid
+                isSuccess
                   ? "text-green-600"
                   : isPending || isTimeout
                   ? "text-yellow-600"
@@ -173,6 +183,11 @@ export default function CheckoutPage() {
           {isPending && (
             <p className="text-gray-400 text-xs mb-6">
               Payment is being processed. This page updates automatically.
+            </p>
+          )}
+          {isShipmentCreated && (
+            <p className="text-gray-400 text-xs mb-6">
+              Your order is being prepared for shipping.
             </p>
           )}
           {isTimeout && (

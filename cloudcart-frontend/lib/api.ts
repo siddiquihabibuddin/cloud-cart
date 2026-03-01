@@ -28,3 +28,19 @@ export async function getOrder(
   const res = await ordersApi.get(`/orders/${orderId}`, { params: { userId } });
   return res.data;
 }
+
+export interface Order {
+  orderId: string;
+  userId: string;
+  status: string;
+  totalAmount: number;
+  createdAt: string;
+  itemsJson?: string;
+  trackingId?: string;
+  shippedAt?: string;
+}
+
+export async function listOrders(userId: string): Promise<Order[]> {
+  const { data } = await ordersApi.get(`/orders?userId=${encodeURIComponent(userId)}`);
+  return data as Order[];
+}

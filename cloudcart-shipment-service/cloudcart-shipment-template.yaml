@@ -72,3 +72,218 @@ Resources:
       Enabled: true
       FunctionResponseTypes:
         - ReportBatchItemFailures
+
+  ### OrderShipped SQS Queues ###
+  OrderShippedDLQDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderShippedDLQDev
+
+  OrderShippedQueueDev:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderShippedQueueDev
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OrderShippedDLQDev.Arn
+        maxReceiveCount: 3
+
+  ### CloudWatch Alarm for OrderShipped DLQ ###
+  OrderShippedDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: cloudcart-OrderShippedDLQ-MessagesVisible
+      AlarmDescription: Alert when messages appear in OrderShippedDLQ
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt OrderShippedDLQDev.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  ### IAM Role for ScanShipmentCreated Lambda ###
+  ScanShipmentLambdaRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ScanShipmentLambdaRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ScanShipmentAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt OrderShippedQueueDev.Arn
+
+  ### IAM Role for ProcessOrderShipped Lambda ###
+  OrderShippedLambdaRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrderShippedLambdaRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OrderShippedAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt OrderShippedQueueDev.Arn
+                  - !GetAtt OrderShippedDLQDev.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
+
+  ### IAM Role for Step Functions State Machine ###
+  ShippingStateMachineRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ShippingStateMachineRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeScanLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ScanShipmentCreatedFunctionDev.Arn
+
+  ### IAM Role for EventBridge Scheduler ###
+  ShippingSchedulerRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ShippingSchedulerRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartStateMachine
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref OrderShippingStateMachine
+
+  ### ScanShipmentCreated Lambda ###
+  ScanShipmentCreatedFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ScanShipmentCreatedFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.shipment.handler.ScanShipmentCreatedHandler::handleRequest
+      Role: !GetAtt ScanShipmentLambdaRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: shipment-service-1.0.0.jar
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
+          ORDER_SHIPPED_QUEUE_URL: !Ref OrderShippedQueueDev
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### ProcessOrderShipped Lambda ###
+  ProcessOrderShippedFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ProcessOrderShippedFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.shipment.handler.ProcessOrderShippedHandler::handleRequest
+      Role: !GetAtt OrderShippedLambdaRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: shipment-service-1.0.0.jar
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### ESM: OrderShippedQueue -> ProcessOrderShippedFunction ###
+  OrderShippedQueueEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt OrderShippedQueueDev.Arn
+      FunctionName: !GetAtt ProcessOrderShippedFunctionDev.Arn
+      BatchSize: 5
+      Enabled: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+  ### Step Functions State Machine ###
+  OrderShippingStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: OrderShippingStateMachineDev
+      RoleArn: !GetAtt ShippingStateMachineRoleDev.Arn
+      DefinitionString:
+        Fn::Sub: |
+          {
+            "Comment": "Scan SHIPMENT_CREATED orders and publish OrderShippedEvents",
+            "StartAt": "ScanAndPublish",
+            "States": {
+              "ScanAndPublish": {
+                "Type": "Task",
+                "Resource": "${ScanShipmentCreatedFunctionDev.Arn}",
+                "End": true
+              }
+            }
+          }
+
+  ### EventBridge Rule: trigger every 5 minutes ###
+  ShippingScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: cloudcart-shipping-schedule-dev
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Id: ShippingStateMachineTarget
+          Arn: !Ref OrderShippingStateMachine
+          RoleArn: !GetAtt ShippingSchedulerRoleDev.Arn

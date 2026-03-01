@@ -32,6 +32,13 @@ export default function Header({ userId, onChangeUser }: HeaderProps) {
           )}
 
           <Link
+            href="/orders"
+            className="text-sm font-medium text-indigo-100 hover:text-white transition"
+          >
+            My Orders
+          </Link>
+
+          <Link
             href="/cart"
             className="relative flex items-center gap-1 bg-white text-indigo-700 font-semibold px-4 py-1.5 rounded-full text-sm hover:bg-indigo-50 transition"
           >

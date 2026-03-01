@@ -1,6 +1,6 @@
 # CloudCart
 
-A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, and Next.js — running locally via LocalStack.
+A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Functions, and Next.js — running locally via LocalStack.
 
 ## Architecture
 
@@ -44,6 +44,16 @@ order-service
     → UpdateItem OrdersTableDev (PAID → SHIPMENT_CREATED)
     → SagaTableDev (COMPLETED / SHIPMENT_CREATED)
 
+  EventBridge (rate 5 min) → OrderShippingStateMachine
+    → ScanShipmentCreatedFunction
+    → scans OrdersTableDev for SHIPMENT_CREATED orders
+    → publishes OrderShippedEvent → OrderShippedQueueDev
+          │ (DLQ: OrderShippedDLQDev)
+          ▼
+    ProcessOrderShippedFunction
+    → UpdateItem OrdersTableDev (SHIPMENT_CREATED → SHIPPED)
+    → sets trackingId (TRK-XXXXXXXX) + shippedAt
+
   If FAILED:
     → SagaTableDev (COMPENSATING / PAYMENT_FAILED)
     → StockCompensationEvent → StockCompensationQueueDev
@@ -62,11 +72,17 @@ order-service
 | `cloudcart-cart-service` | Java 21 Lambda | REST API | `CartTableDev` |
 | `cloudcart-order-service` | Java 21 Lambda | REST API | `OrdersTableDev`, `IdempotencyTableDev`, `SagaTableDev` |
 | `cloudcart-payment-service` | Java 21 Lambda | SQS (`OrderPlacedQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
-| `cloudcart-shipment-service` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
+| `ProcessShipmentFunctionDev` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
+| `ScanShipmentCreatedFunctionDev` | Java 21 Lambda | Step Functions (EventBridge schedule) | `OrdersTableDev` |
+| `ProcessOrderShippedFunctionDev` | Java 21 Lambda | SQS (`OrderShippedQueueDev`) | `OrdersTableDev` |
 | `ProcessCompensationFunctionDev` | Java 21 Lambda | SQS (`StockCompensationQueueDev`) | `SagaTableDev` |
 | `cloudcart-frontend` | Next.js | — | — |
 
 ## API Routes
+
+### Orders Page
+
+Customers can view all their past orders at `/orders`. The page lists each order with its status badge, total amount, date, and — once shipped — the tracking number. A "My Orders" link in the header provides quick navigation.
 
 ### Product Catalog
 | Method | Path | Description |
@@ -113,21 +129,36 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
    - Conditional `UpdateItem` (`status = PAID → SHIPMENT_CREATED`) — idempotent on retry
    - Saga updated to `COMPLETED / SHIPMENT_CREATED`
    - Failed records retry up to 3× before landing in `PaymentSuccessDLQDev`
-5. Compensation Lambda consumes `StockCompensationEvent` (batch size 1)
+5. EventBridge rule fires every 5 minutes → starts `OrderShippingStateMachineDev`
+   - `ScanShipmentCreatedFunctionDev` scans `OrdersTableDev` for `SHIPMENT_CREATED` orders
+   - Publishes one `OrderShippedEvent` per order to `OrderShippedQueueDev`
+   - `ProcessOrderShippedFunctionDev` consumes each event (batch size 5)
+   - Conditional `UpdateItem` (`status = SHIPMENT_CREATED → SHIPPED`) — idempotent on retry
+   - Generates `trackingId` (`TRK-XXXXXXXX`) and records `shippedAt` timestamp
+   - Failed records retry up to 3× before landing in `OrderShippedDLQDev`
+6. Compensation Lambda consumes `StockCompensationEvent` (batch size 1)
    - Calls `PATCH /products/{id}/stock {"release":N}` for each item sequentially
    - On any HTTP failure → message returned to `StockCompensationQueueDev` for retry (up to 3×, then `StockCompensationDLQDev`)
    - On full success → saga updated to `COMPENSATION_COMPLETED / STOCK_RELEASED`
-6. Checkout page polls `GET /orders/{id}` every 2s — status progresses PENDING → PAID → SHIPMENT_CREATED
+7. Checkout page polls `GET /orders/{id}` every 2s — status progresses PENDING → PAID → SHIPMENT_CREATED; once `SHIPMENT_CREATED` the page shows "Shipment Created" and stops polling. The order advances to `SHIPPED` asynchronously via the scheduler (visible on the `/orders` page).
 
 ## Saga State Machine
 
 ```
-PlaceOrderHandler        → STARTED  / STOCK_RESERVED
-ProcessPaymentHandler    → STARTED  / PAYMENT_COMPLETED   (PAID path)
-                         → COMPENSATING / PAYMENT_FAILED  (FAILED path)
-ProcessShipmentHandler   → COMPLETED / SHIPMENT_CREATED
+PlaceOrderHandler          → STARTED      / STOCK_RESERVED
+ProcessPaymentHandler      → STARTED      / PAYMENT_COMPLETED   (PAID path)
+                           → COMPENSATING / PAYMENT_FAILED      (FAILED path)
+ProcessShipmentHandler     → COMPLETED    / SHIPMENT_CREATED
 ProcessCompensationHandler → COMPENSATION_COMPLETED / STOCK_RELEASED
-                           (or stays COMPENSATING → DLQ after 3 retries)
+                             (or stays COMPENSATING → DLQ after 3 retries)
+```
+
+Order status lifecycle:
+```
+PENDING → PAID → SHIPMENT_CREATED → SHIPPED
+                                    (set by ProcessOrderShippedFunction with trackingId)
+PENDING → FAILED
+          (stock released via StockCompensationQueue)
 ```
 
 `SagaTableDev` records carry a 7-day TTL (`expiresAt`) and are keyed by `orderId`. All saga updates use conditional writes (`sagaStatus = :expected`) so concurrent retries are idempotent.
@@ -140,8 +171,9 @@ ProcessCompensationHandler → COMPENSATION_COMPLETED / STOCK_RELEASED
 | **SQS-based compensation** | Payment failure publishes to `StockCompensationQueueDev` instead of a fire-and-forget HTTP call; the compensation Lambda retries up to 3× with DLQ fallback |
 | **Idempotency** | `POST /orders` deduplicates on `Idempotency-Key` header; results cached 24h in DynamoDB |
 | **Stock reservation** | `PATCH /products/{id}/stock {"reserve":N}` — conditional decrement; on order-placement failure, already-reserved items are released synchronously |
-| **Dead Letter Queues** | `OrderPlacedDLQDev`, `PaymentSuccessDLQDev`, `StockCompensationDLQDev` — messages moved after 3 failed delivery attempts |
-| **CloudWatch alarms** | `ApproximateNumberOfMessagesVisible > 0` on all three DLQs |
+| **Dead Letter Queues** | `OrderPlacedDLQDev`, `PaymentSuccessDLQDev`, `StockCompensationDLQDev`, `OrderShippedDLQDev` — messages moved after 3 failed delivery attempts |
+| **CloudWatch alarms** | `ApproximateNumberOfMessagesVisible > 0` on all four DLQs |
+| **Scheduled shipping** | EventBridge rule (`rate(5 minutes)`) → Step Functions → `ScanShipmentCreatedFunctionDev` scans for `SHIPMENT_CREATED` orders and fans out to `OrderShippedQueueDev` |
 | **Conditional DynamoDB writes** | All status transitions use condition expressions; stale retries skip silently |
 | **Order ownership check** | `GET /orders/{orderId}` requires `?userId=X`; returns 403 if mismatched |
 | **GSI query for order listing** | `GET /orders?userId=X` queries `userId-index` GSI — O(results), not O(table) |
@@ -151,7 +183,8 @@ ProcessCompensationHandler → COMPENSATION_COMPLETED / STOCK_RELEASED
 | **SDK retry** | All DynamoDB/SQS clients configured with 3 retries + exponential backoff |
 | **Static SDK clients** | Clients initialised once per Lambda container; reused across warm invocations |
 | **Structured logging** | JSON logs to stdout with `timestamp`, `level`, `service`, `correlationId` fields |
-| **CloudWatch metrics** | EMF-format metrics: `OrderPlaced`, `StockInsufficient`, `PaymentSucceeded`, `PaymentFailed`, `ShipmentInitiated`, `CompensationCompleted`, `SagaUpdateFailed`, and error counters |
+| **CloudWatch metrics** | EMF-format metrics: `OrderPlaced`, `StockInsufficient`, `PaymentSucceeded`, `PaymentFailed`, `ShipmentInitiated`, `OrderShipped`, `CompensationCompleted`, `SagaUpdateFailed`, and error counters |
+| **Orders page** | `/orders` frontend page — lists all orders for a user with status badges, totals, dates, and tracking numbers once shipped |
 
 ## Screenshots
 
@@ -250,8 +283,31 @@ awslocal cloudwatch describe-alarms \
   --alarm-names \
     cloudcart-OrderPlacedDLQ-MessagesVisible \
     cloudcart-PaymentSuccessDLQ-MessagesVisible \
-    cloudcart-StockCompensationDLQ-MessagesVisible
+    cloudcart-StockCompensationDLQ-MessagesVisible \
+    cloudcart-OrderShippedDLQ-MessagesVisible
 ```
+
+## Triggering the Scheduled Shipping Flow
+
+The EventBridge rule fires every 5 minutes automatically. To trigger it manually for testing:
+
+```bash
+# Find the state machine ARN
+awslocal stepfunctions list-state-machines
+
+# Manually start an execution
+awslocal stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:us-east-1:000000000000:stateMachine:OrderShippingStateMachineDev \
+  --input '{}'
+
+# Check a specific order for SHIPPED status + tracking number
+awslocal dynamodb get-item \
+  --table-name OrdersTableDev \
+  --key '{"orderId": {"S": "<your-order-id>"}}' \
+  --output table
+```
+
+After execution, orders that were in `SHIPMENT_CREATED` will advance to `SHIPPED` with a `trackingId` (e.g. `TRK-A3F2B8C1`) and a `shippedAt` timestamp. The `/orders` page will reflect the updated status.
 
 ## Tech Stack
 
