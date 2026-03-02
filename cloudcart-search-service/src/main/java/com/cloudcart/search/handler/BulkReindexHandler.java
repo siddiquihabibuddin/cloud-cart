@@ -17,6 +17,7 @@ public class BulkReindexHandler implements RequestHandler<Map<String, Object>, M
     @Override
     public Map<String, Object> handleRequest(Map<String, Object> event, Context context) {
         try {
+            SEARCH_REPO.ensureIndex();
             List<ProductDocument> products = SCAN_REPO.scanAll();
             SEARCH_REPO.bulkIndex(products);
             return response(200, "{\"indexed\":" + products.size() + "}");

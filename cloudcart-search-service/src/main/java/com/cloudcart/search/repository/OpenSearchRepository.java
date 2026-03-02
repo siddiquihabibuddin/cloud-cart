@@ -3,6 +3,7 @@ package com.cloudcart.search.repository;
 import com.cloudcart.search.model.ProductDocument;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -20,10 +21,12 @@ public class OpenSearchRepository {
     public OpenSearchRepository() {
         String ep = System.getenv("OPENSEARCH_ENDPOINT");
         this.endpoint = (ep != null && !ep.isBlank()) ? ep : "http://localhost:9200";
-        ensureIndex();
+        // ensureIndex() intentionally NOT called here — it makes a blocking HTTP call
+        // that would stall Lambda cold start if OpenSearch is slow. Call it explicitly
+        // from BulkReindexHandler before indexing.
     }
 
-    private void ensureIndex() {
+    public void ensureIndex() {
         try {
             String mapping = """
                 {
@@ -80,13 +83,21 @@ public class OpenSearchRepository {
     }
 
     public List<ProductDocument> search(String query, int size) throws Exception {
-        String body = String.format("""
-            {"query":{"multi_match":{"query":"%s","fields":["title^2","category"]}},"size":%d}
-            """, query.replace("\"", "\\\""), size);
+        // Build query via Jackson to prevent JSON/query injection — never interpolate
+        // user input directly into a raw JSON string.
+        ObjectNode multiMatch = MAPPER.createObjectNode()
+            .put("query", query)
+            .put("type", "best_fields");
+        multiMatch.putArray("fields").add("title^2").add("category");
+
+        ObjectNode body = MAPPER.createObjectNode();
+        body.putObject("query").set("multi_match", multiMatch);
+        body.put("size", size);
+
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(endpoint + "/products/_search"))
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
             .build();
         HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
@@ -117,6 +128,19 @@ public class OpenSearchRepository {
         HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
             throw new RuntimeException("bulkIndex failed: " + resp.statusCode() + " " + resp.body());
+        }
+        // _bulk always returns HTTP 200 even when individual operations fail.
+        // Parse the "errors" flag and collect failed document IDs.
+        JsonNode bulkResp = MAPPER.readTree(resp.body());
+        if (bulkResp.path("errors").asBoolean(false)) {
+            List<String> failed = new ArrayList<>();
+            for (JsonNode item : bulkResp.path("items")) {
+                JsonNode indexResult = item.path("index");
+                if (indexResult.has("error")) {
+                    failed.add(indexResult.path("_id").asText("unknown"));
+                }
+            }
+            throw new RuntimeException("bulkIndex had " + failed.size() + " document failures: " + failed);
         }
     }
 }

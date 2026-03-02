@@ -43,11 +43,14 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+                  - dynamodb:ListStreams
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - dynamodb:GetRecords
                   - dynamodb:GetShardIterator
                   - dynamodb:DescribeStream
-                  - dynamodb:ListStreams
-                Resource: "*"
+                Resource: !Ref ProductsTableStreamArn
               - Effect: Allow
                 Action:
                   - dynamodb:Scan

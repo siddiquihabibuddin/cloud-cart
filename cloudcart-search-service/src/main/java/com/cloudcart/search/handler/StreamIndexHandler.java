@@ -33,6 +33,14 @@ public class StreamIndexHandler implements RequestHandler<Map<String, Object>, M
                     REPO.deleteDocument(productId);
                 } else {
                     Map<String, Object> image = (Map<String, Object>) dynamo.get("NewImage");
+                    if (image == null) {
+                        // NewImage absent — stream StreamViewType may not include NEW_IMAGE.
+                        // Not a transient error; retrying won't help, so do not add to failures.
+                        context.getLogger().log("Skipping record " + seqNum +
+                            " (eventName=" + eventName + "): NewImage is null." +
+                            " Verify DynamoDB stream StreamViewType includes NEW_AND_OLD_IMAGES.");
+                        continue;
+                    }
                     ProductDocument doc = parseImage(image);
                     REPO.indexDocument(doc);
                 }

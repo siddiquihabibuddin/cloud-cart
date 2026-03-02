@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listProducts, searchProducts, Product } from "@/lib/products";
 import ProductCard from "@/components/ProductCard";
 
@@ -14,6 +14,7 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Product[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const searchCounterRef = useRef(0);
 
   useEffect(() => {
     setUserId(localStorage.getItem("cc_user_id"));
@@ -34,17 +35,26 @@ export default function ProductsPage() {
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults(null);
+      setSearching(false);
       return;
     }
+    const requestId = ++searchCounterRef.current;
     const id = setTimeout(async () => {
       setSearching(true);
       try {
         const { products } = await searchProducts(searchQuery);
-        setSearchResults(products);
+        // Discard stale responses — only apply the most recent request's result
+        if (requestId === searchCounterRef.current) {
+          setSearchResults(products);
+        }
       } catch {
-        setSearchResults([]);
+        if (requestId === searchCounterRef.current) {
+          setSearchResults([]);
+        }
       } finally {
-        setSearching(false);
+        if (requestId === searchCounterRef.current) {
+          setSearching(false);
+        }
       }
     }, 300);
     return () => clearTimeout(id);
