@@ -73,6 +73,12 @@ Resources:
       FunctionResponseTypes:
         - ReportBatchItemFailures
 
+  ### SNS Topic for shipping notifications ###
+  OrderShippedTopicDev:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: OrderShippedTopicDev
+
   ### OrderShipped SQS Queues ###
   OrderShippedDLQDev:
     Type: AWS::SQS::Queue
@@ -165,6 +171,10 @@ Resources:
                 Action:
                   - dynamodb:UpdateItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/OrdersTableDev"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref OrderShippedTopicDev
 
   ### IAM Role for Step Functions State Machine ###
   ShippingStateMachineRoleDev:
@@ -243,6 +253,7 @@ Resources:
       Environment:
         Variables:
           ORDERS_TABLE: !ImportValue cloudcart-order-OrdersTableName
+          ORDER_SHIPPED_TOPIC_ARN: !Ref OrderShippedTopicDev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   ### ESM: OrderShippedQueue -> ProcessOrderShippedFunction ###

@@ -53,6 +53,7 @@ order-service
     ProcessOrderShippedFunction
     → UpdateItem OrdersTableDev (SHIPMENT_CREATED → SHIPPED)
     → sets trackingId (TRK-XXXXXXXX) + shippedAt
+    → publishes SNS notification → OrderShippedTopicDev
 
   If FAILED:
     → SagaTableDev (COMPENSATING / PAYMENT_FAILED)
@@ -74,7 +75,7 @@ order-service
 | `cloudcart-payment-service` | Java 21 Lambda | SQS (`OrderPlacedQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
 | `ProcessShipmentFunctionDev` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
 | `ScanShipmentCreatedFunctionDev` | Java 21 Lambda | Step Functions (EventBridge schedule) | `OrdersTableDev` |
-| `ProcessOrderShippedFunctionDev` | Java 21 Lambda | SQS (`OrderShippedQueueDev`) | `OrdersTableDev` |
+| `ProcessOrderShippedFunctionDev` | Java 21 Lambda | SQS (`OrderShippedQueueDev`) | `OrdersTableDev`, SNS (`OrderShippedTopicDev`) |
 | `ProcessCompensationFunctionDev` | Java 21 Lambda | SQS (`StockCompensationQueueDev`) | `SagaTableDev` |
 | `cloudcart-frontend` | Next.js | — | — |
 
@@ -135,6 +136,7 @@ All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
    - `ProcessOrderShippedFunctionDev` consumes each event (batch size 5)
    - Conditional `UpdateItem` (`status = SHIPMENT_CREATED → SHIPPED`) — idempotent on retry
    - Generates `trackingId` (`TRK-XXXXXXXX`) and records `shippedAt` timestamp
+   - Publishes a shipping notification to `OrderShippedTopicDev` (SNS) with `orderId`, `userId`, and `trackingId` — non-fatal if SNS publish fails (order is already SHIPPED in DynamoDB)
    - Failed records retry up to 3× before landing in `OrderShippedDLQDev`
 6. Compensation Lambda consumes `StockCompensationEvent` (batch size 1)
    - Calls `PATCH /products/{id}/stock {"release":N}` for each item sequentially
@@ -178,6 +180,7 @@ PENDING → FAILED
 | **Order ownership check** | `GET /orders/{orderId}` requires `?userId=X`; returns 403 if mismatched |
 | **GSI query for order listing** | `GET /orders?userId=X` queries `userId-index` GSI — O(results), not O(table) |
 | **Batch item failures** | Payment, shipment, and compensation Lambdas return `batchItemFailures` so only failed records are retried |
+| **SNS shipping notifications** | `ProcessOrderShippedFunctionDev` publishes to `OrderShippedTopicDev` after each successful SHIPPED transition — payload: `{orderId, userId, trackingId}`; SNS publish failure is non-fatal (logged, does not trigger retry) |
 | **API key auth** | All order endpoints require `x-api-key: cloudcart-dev-key-2024` |
 | **Input validation** | 400s for blank fields, quantity < 1, negative prices, non-numeric pagination params |
 | **SDK retry** | All DynamoDB/SQS clients configured with 3 retries + exponential backoff |
@@ -312,9 +315,38 @@ awslocal dynamodb get-item \
 
 After execution, orders that were in `SHIPMENT_CREATED` will advance to `SHIPPED` with a `trackingId` (e.g. `TRK-A3F2B8C1`) and a `shippedAt` timestamp. The `/orders` page will reflect the updated status.
 
+### Verifying SNS shipping notifications
+
+Each SHIPPED transition publishes a notification to `OrderShippedTopicDev`. To capture notifications in a test queue:
+
+```bash
+# Create a test queue and subscribe it to the SNS topic
+awslocal sqs create-queue --queue-name SNSTestQueueDev
+awslocal sns subscribe \
+  --topic-arn arn:aws:sns:us-east-1:000000000000:OrderShippedTopicDev \
+  --protocol sqs \
+  --notification-endpoint arn:aws:sqs:us-east-1:000000000000:SNSTestQueueDev
+
+# Trigger the shipping flow, then poll for the notification
+awslocal sqs receive-message \
+  --queue-url http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/SNSTestQueueDev \
+  --wait-time-seconds 5
+```
+
+Each message body contains:
+```json
+{
+  "Subject": "Your CloudCart order has shipped!",
+  "TopicArn": "arn:aws:sns:us-east-1:000000000000:OrderShippedTopicDev",
+  "Message": "{\"orderId\":\"...\",\"userId\":\"...\",\"trackingId\":\"TRK-XXXXXXXX\"}"
+}
+```
+
+Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` via the AWS console or CloudFormation to fan out notifications to real consumers.
+
 ## Tech Stack
 
-- **Backend**: AWS Lambda (Java 21), DynamoDB, SQS, API Gateway (REST v1)
+- **Backend**: AWS Lambda (Java 21), DynamoDB, SQS, SNS, API Gateway (REST v1)
 - **Frontend**: Next.js, TypeScript, Tailwind CSS, Axios
 - **Infrastructure**: AWS CloudFormation, LocalStack Pro
 - **Build**: Maven (Shade plugin for fat JARs)

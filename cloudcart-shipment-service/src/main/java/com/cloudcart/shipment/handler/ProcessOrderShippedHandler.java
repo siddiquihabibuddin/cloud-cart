@@ -13,6 +13,9 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClientBuilder;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sns.SnsClientBuilder;
+import software.amazon.awssdk.services.sns.model.PublishRequest;
 
 import java.net.URI;
 import java.time.Instant;
@@ -27,7 +30,9 @@ public class ProcessOrderShippedHandler implements RequestHandler<Map<String, Ob
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Shipping");
     private static final DynamoDbClient DYNAMO_CLIENT;
+    private static final SnsClient SNS_CLIENT;
     private static final String ORDERS_TABLE = System.getenv("ORDERS_TABLE");
+    private static final String ORDER_SHIPPED_TOPIC_ARN = System.getenv("ORDER_SHIPPED_TOPIC_ARN");
 
     static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
@@ -40,6 +45,12 @@ public class ProcessOrderShippedHandler implements RequestHandler<Map<String, Ob
             dynamoBuilder.endpointOverride(URI.create(endpointUrl));
         }
         DYNAMO_CLIENT = dynamoBuilder.build();
+
+        SnsClientBuilder snsBuilder = SnsClient.builder().overrideConfiguration(overrideConfig);
+        if (endpointUrl != null && !endpointUrl.isEmpty()) {
+            snsBuilder.endpointOverride(URI.create(endpointUrl));
+        }
+        SNS_CLIENT = snsBuilder.build();
     }
 
     @Override
@@ -81,6 +92,26 @@ public class ProcessOrderShippedHandler implements RequestHandler<Map<String, Ob
                 } catch (ConditionalCheckFailedException condEx) {
                     logger.info("Order already shipped, skipping", Map.of("orderId", event.getOrderId()));
                     continue;
+                }
+
+                if (ORDER_SHIPPED_TOPIC_ARN != null) {
+                    try {
+                        Map<String, Object> notification = new HashMap<>();
+                        notification.put("orderId", event.getOrderId());
+                        notification.put("userId", event.getUserId());
+                        notification.put("trackingId", trackingId);
+                        SNS_CLIENT.publish(PublishRequest.builder()
+                                .topicArn(ORDER_SHIPPED_TOPIC_ARN)
+                                .subject("Your CloudCart order has shipped!")
+                                .message(MAPPER.writeValueAsString(notification))
+                                .build());
+                        logger.info("SNS shipping notification sent", Map.of("orderId", event.getOrderId()));
+                    } catch (Exception snsEx) {
+                        // Non-fatal: order IS shipped. Log and continue.
+                        logger.error("Failed to send SNS shipping notification", Map.of(
+                                "orderId", event.getOrderId(),
+                                "error", String.valueOf(snsEx.getMessage())));
+                    }
                 }
 
                 logger.info("Order marked SHIPPED", Map.of(
