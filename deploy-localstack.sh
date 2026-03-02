@@ -8,12 +8,14 @@ PRODUCT_DIR="cloudcart-product-catalog-java"
 ORDER_DIR="cloudcart-order-service"
 PAYMENT_DIR="cloudcart-payment-service"
 SHIPMENT_DIR="cloudcart-shipment-service"
+SEARCH_DIR="cloudcart-search-service"
 S3_BUCKET="sid-mysourcecode"
 CART_JAR="cart-service-1.0.0.jar"
 PRODUCT_JAR="product-catalog-1.0.0.jar"
 ORDER_JAR="order-service-1.0.0.jar"
 PAYMENT_JAR="payment-service-1.0.0.jar"
 SHIPMENT_JAR="shipment-service-1.0.0.jar"
+SEARCH_JAR="search-service-1.0.0.jar"
 
 echo "==> Building cart service..."
 mvn -f "$CART_DIR/pom.xml" package -q -DskipTests
@@ -30,6 +32,9 @@ mvn -f "$PAYMENT_DIR/pom.xml" package -q -DskipTests
 echo "==> Building shipment service..."
 mvn -f "$SHIPMENT_DIR/pom.xml" package -q -DskipTests
 
+echo "==> Building search service..."
+mvn -f "$SEARCH_DIR/pom.xml" package -q -DskipTests
+
 echo "==> Uploading JARs to S3..."
 awslocal s3 mb "s3://$S3_BUCKET" 2>/dev/null || true
 awslocal s3 cp "$CART_DIR/target/$CART_JAR"         "s3://$S3_BUCKET/$CART_JAR"
@@ -37,6 +42,7 @@ awslocal s3 cp "$PRODUCT_DIR/target/$PRODUCT_JAR"   "s3://$S3_BUCKET/$PRODUCT_JA
 awslocal s3 cp "$ORDER_DIR/target/$ORDER_JAR"       "s3://$S3_BUCKET/$ORDER_JAR"
 awslocal s3 cp "$PAYMENT_DIR/target/$PAYMENT_JAR"   "s3://$S3_BUCKET/$PAYMENT_JAR"
 awslocal s3 cp "$SHIPMENT_DIR/target/$SHIPMENT_JAR" "s3://$S3_BUCKET/$SHIPMENT_JAR"
+awslocal s3 cp "$SEARCH_DIR/target/$SEARCH_JAR"       "s3://$S3_BUCKET/$SEARCH_JAR"
 
 cf_deploy() {
   # cloudformation deploy exits 255 when there are no changes; treat that as success
@@ -74,6 +80,29 @@ cf_deploy \
   --stack-name cloudcart-shipment-dev \
   --capabilities CAPABILITY_NAMED_IAM
 
+echo "==> Enabling DynamoDB streams on ProductsTableDev (LocalStack requires CLI; CF attribute returns 'unknown')..."
+awslocal dynamodb update-table \
+  --table-name ProductsTableDev \
+  --stream-specification StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES 2>/dev/null || true
+
+echo "==> Getting ProductsTableDev stream ARN..."
+STREAM_ARN=$(awslocal dynamodbstreams list-streams \
+  --table-name ProductsTableDev \
+  --query "Streams[0].StreamArn" \
+  --output text 2>/dev/null || echo "")
+echo "    Stream ARN: ${STREAM_ARN}"
+
+if [ -z "$STREAM_ARN" ] || [ "$STREAM_ARN" = "None" ]; then
+  echo "  WARNING: Could not get stream ARN; skipping search stack deploy"
+else
+  echo "==> Deploying search service stack..."
+  cf_deploy \
+    --template-file "cloudcart-search-template.yaml" \
+    --stack-name cloudcart-search-dev \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameter-overrides "ProductsTableStreamArn=${STREAM_ARN}"
+fi
+
 echo "==> Deploying unified gateway stack..."
 cf_deploy \
   --template-file "cloudcart-gateway-template.yaml" \
@@ -103,6 +132,12 @@ awslocal cloudformation describe-stacks \
 echo "--- Shipment service ---"
 awslocal cloudformation describe-stacks \
   --stack-name cloudcart-shipment-dev \
+  --query "Stacks[0].Outputs" \
+  --output table
+
+echo "--- Search service ---"
+awslocal cloudformation describe-stacks \
+  --stack-name cloudcart-search-dev \
   --query "Stacks[0].Outputs" \
   --output table
 

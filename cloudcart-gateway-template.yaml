@@ -340,6 +340,66 @@ Resources:
           - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
           - Fn: !ImportValue cloudcart-order-GetOrderFunctionArn
 
+  ### /search and /search/reindex ###
+  SearchResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !GetAtt UnifiedApiDev.RootResourceId
+      PathPart: search
+
+  SearchReindexResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref SearchResourceDev
+      PathPart: reindex
+
+  SearchProductsPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-search-SearchProductsFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  BulkReindexPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-search-BulkReindexFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  ### Methods — Search ###
+  GetSearchMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref SearchResourceDev
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-search-SearchProductsFunctionArn
+
+  PostReindexMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref SearchReindexResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-search-BulkReindexFunctionArn
+
   ### Deployment & Stage ###
   UnifiedApiDeploymentDev:
     Type: AWS::ApiGateway::Deployment
@@ -356,8 +416,11 @@ Resources:
       - PostOrderMethodDev
       - ListOrdersMethodDev
       - GetOrderMethodDev
+      - GetSearchMethodDev
+      - PostReindexMethodDev
     Properties:
       RestApiId: !Ref UnifiedApiDev
+      Description: "v2 - adds search endpoints"
 
   UnifiedApiStageDev:
     Type: AWS::ApiGateway::Stage

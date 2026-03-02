@@ -15,6 +15,8 @@ Resources:
         - AttributeName: productID
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
 
   ### IAM Role ###
   LambdaExecutionRoleDev:
@@ -279,3 +281,13 @@ Outputs:
     Value: !GetAtt UpdateStockFunctionDev.Arn
     Export:
       Name: cloudcart-products-UpdateStockFunctionArn
+
+  ProductsTableStreamArn:
+    Value: !GetAtt ProductsTableDev.StreamArn
+    Export:
+      Name: cloudcart-products-ProductsTableStreamArn
+
+  ProductsTableNameExport:
+    Value: !Ref ProductsTableDev
+    Export:
+      Name: cloudcart-products-ProductsTableName

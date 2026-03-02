@@ -1,4 +1,4 @@
-import { productsApi } from "./api";
+import { productsApi, searchApi } from "./api";
 
 export type Product = {
   productId: string;
@@ -30,5 +30,15 @@ export async function listProducts(
 
 export async function getProduct(id: string): Promise<Product> {
   const res = await productsApi.get<Product>(`/products/${id}`);
+  return res.data;
+}
+
+export async function searchProducts(
+  query: string,
+  limit = 20
+): Promise<{ products: Product[]; total: number }> {
+  const res = await searchApi.get<{ products: Product[]; total: number }>("/", {
+    params: { q: query, limit },
+  });
   return res.data;
 }

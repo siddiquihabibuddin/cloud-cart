@@ -13,6 +13,10 @@ export const ordersApi = axios.create({
   headers: { "x-api-key": "cloudcart-dev-key-2024" },
 });
 
+export const searchApi = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_SEARCH_API,
+});
+
 export async function placeOrder(
   userId: string,
   items: Array<{ productId: string; quantity: number; price: number }>

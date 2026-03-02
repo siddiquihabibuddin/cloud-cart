@@ -5,21 +5,38 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Func
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      Next.js Frontend                   │
-│         Products → Cart → Checkout → Order Status       │
-└───────────────────────────┬─────────────────────────────┘
-                            │ /api-products, /api-cart, /api-orders
-                ┌───────────▼───────────┐
-                │   Unified API Gateway  │
-                │   (UnifiedApiDev)      │
-                └──┬──────────┬─────────┘
-                   │          │           │
-    ┌──────────────▼──┐  ┌────▼────┐  ┌──▼──────────────┐
-    │  product-catalog│  │  cart   │  │  order-service   │
-    │  Lambda + DDB   │  │  Lambda │  │  Lambda + DDB    │
-    └─────────────────┘  │  + DDB  │  └─────────────────┘
-                         └─────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                         Next.js Frontend                         │
+│    Products + Search → Cart → Checkout → Order Status → Orders   │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │ /api-products, /api-cart,
+                               │ /api-orders,  /api-search
+                   ┌───────────▼───────────┐
+                   │   Unified API Gateway  │
+                   │   (UnifiedApiDev)      │
+                   └──┬──────┬──────┬──────┘
+                      │      │      │      │
+    ┌─────────────────▼─┐  ┌─▼──┐  ┌▼──────────────┐  ┌──────────────────┐
+    │  product-catalog  │  │cart│  │  order-service  │  │  search-service  │
+    │  Lambda + DDB     │  │ λ  │  │  Lambda + DDB   │  │  Lambda +        │
+    │  (DDB Stream ──────────────────────────────────────► OpenSearch)     │
+    └───────────────────┘  └────┘  └────────────────┘  └──────────────────┘
+```
+
+### Search Architecture
+
+Product writes to `ProductsTableDev` emit DynamoDB Stream events. `StreamIndexFunctionDev` consumes the stream and keeps the OpenSearch index in sync automatically. For initial or manual reindexing, `BulkReindexFunctionDev` scans the full table and bulk-loads it into OpenSearch.
+
+```
+POST /products  ──► ProductsTableDev  ──► DynamoDB Stream
+                                               │
+                                     StreamIndexFunctionDev
+                                               │ PUT /products/_doc/{id}
+                                               ▼
+                                          OpenSearch
+                                        (cloudcart-search-dev)
+                                               ▲
+                          GET /search?q=... ───┘ (multi_match: title^2, category)
 ```
 
 ### Order Saga (Choreography)
@@ -67,19 +84,28 @@ order-service
 
 ## Services
 
-| Service | Runtime | Trigger | Tables |
+| Service | Runtime | Trigger | Storage |
 |---|---|---|---|
-| `cloudcart-product-catalog-java` | Java 21 Lambda | REST API | `ProductsTableDev` |
-| `cloudcart-cart-service` | Java 21 Lambda | REST API | `CartTableDev` |
+| `cloudcart-product-catalog-java` | Java 21 Lambda | REST API | `ProductsTableDev` (DDB) |
+| `cloudcart-cart-service` | Java 21 Lambda | REST API | `CartTableDev` (DDB) |
 | `cloudcart-order-service` | Java 21 Lambda | REST API | `OrdersTableDev`, `IdempotencyTableDev`, `SagaTableDev` |
 | `cloudcart-payment-service` | Java 21 Lambda | SQS (`OrderPlacedQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
 | `ProcessShipmentFunctionDev` | Java 21 Lambda | SQS (`PaymentSuccessQueueDev`) | `OrdersTableDev`, `SagaTableDev` |
 | `ScanShipmentCreatedFunctionDev` | Java 21 Lambda | Step Functions (EventBridge schedule) | `OrdersTableDev` |
-| `ProcessOrderShippedFunctionDev` | Java 21 Lambda | SQS (`OrderShippedQueueDev`) | `OrdersTableDev`, SNS (`OrderShippedTopicDev`) |
+| `ProcessOrderShippedFunctionDev` | Java 21 Lambda | SQS (`OrderShippedQueueDev`) | `OrdersTableDev`, SNS |
 | `ProcessCompensationFunctionDev` | Java 21 Lambda | SQS (`StockCompensationQueueDev`) | `SagaTableDev` |
+| `cloudcart-search-service` | Java 21 Lambda | DDB Stream + REST API | OpenSearch (`cloudcart-search-dev`) |
 | `cloudcart-frontend` | Next.js | — | — |
 
 ## API Routes
+
+### Product Search
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/search?q=<term>&limit=N` | Full-text search across `title` (boosted 2×) and `category`; `limit` 1–100, default 20 |
+| `POST` | `/search/reindex` | Bulk-reindex all products from DynamoDB into OpenSearch — useful after a fresh deploy |
+
+Search uses OpenSearch `multi_match` with the standard analyzer. Whole-word token matching: `headphones` matches "Wireless Headphones"; `phone` does not (use the full word).
 
 ### Orders Page
 
@@ -191,6 +217,9 @@ PENDING → FAILED
 
 ## Screenshots
 
+### Product Search
+![Product Search](screenshots/search.png)
+
 ### Product Listing
 ![Product Listing](screenshots/product-listing.png)
 
@@ -233,8 +262,10 @@ docker run -d \
 bash deploy-localstack.sh
 ```
 
-Builds all five service JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
-`cart` + `products` → `order` → `payment` → `shipment` → `gateway`
+Builds all six service JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
+`cart` + `products` → `order` → `payment` → `shipment` → `search` → `gateway`
+
+The script also enables DynamoDB Streams on `ProductsTableDev` (required for real-time search indexing) and passes the stream ARN to the search stack as a parameter, working around a LocalStack limitation where `!GetAtt Table.StreamArn` returns `"unknown"` in CloudFormation.
 
 ### 3. Configure the frontend
 
@@ -244,12 +275,24 @@ After deploy, grab the `UnifiedApiInternalUrl` from the gateway stack output and
 NEXT_PUBLIC_PRODUCTS_API=/api-products
 NEXT_PUBLIC_CART_API=/api-cart
 NEXT_PUBLIC_ORDER_API=/api-orders
+NEXT_PUBLIC_SEARCH_API=/api-search
 NEXT_PUBLIC_UNIFIED_API_INTERNAL=http://localhost:4566/restapis/<gateway-api-id>/dev/_user_request_
 ```
 
-All three frontend rewrites (`/api-products`, `/api-cart`, `/api-orders`) route through the single unified gateway — only one API ID is needed.
+All four frontend rewrites (`/api-products`, `/api-cart`, `/api-orders`, `/api-search`) route through the single unified gateway — only one API ID is needed.
 
-### 4. Start the frontend
+### 4. Seed the search index
+
+After deploying and seeding products, bulk-load them into OpenSearch:
+
+```bash
+curl -X POST "http://localhost:4566/restapis/<gateway-api-id>/dev/_user_request_/search/reindex"
+# {"indexed":10}
+```
+
+The search index stays in sync automatically via the DynamoDB Stream → `StreamIndexFunctionDev` after this initial load.
+
+### 5. Start the frontend
 
 ```bash
 cd cloudcart-frontend
@@ -259,7 +302,7 @@ npm run dev
 
 Open **http://localhost:3000**
 
-### 5. Seed products (optional)
+### 6. Seed products (optional)
 
 Products are seeded automatically at the end of `deploy-localstack.sh`. To re-run manually:
 
@@ -346,7 +389,7 @@ Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` vi
 
 ## Tech Stack
 
-- **Backend**: AWS Lambda (Java 21), DynamoDB, SQS, SNS, API Gateway (REST v1)
+- **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch, API Gateway (REST v1)
 - **Frontend**: Next.js, TypeScript, Tailwind CSS, Axios
 - **Infrastructure**: AWS CloudFormation, LocalStack Pro
 - **Build**: Maven (Shade plugin for fat JARs)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listProducts, Product } from "@/lib/products";
+import { listProducts, searchProducts, Product } from "@/lib/products";
 import ProductCard from "@/components/ProductCard";
 
 export default function ProductsPage() {
@@ -11,6 +11,9 @@ export default function ProductsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Product[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     setUserId(localStorage.getItem("cc_user_id"));
@@ -28,6 +31,25 @@ export default function ProductsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+    const id = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const { products } = await searchProducts(searchQuery);
+        setSearchResults(products);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
+
   async function loadMore() {
     if (!nextKey) return;
     setLoadingMore(true);
@@ -42,11 +64,44 @@ export default function ProductsPage() {
     }
   }
 
+  const displayProducts = searchResults !== null ? searchResults : products;
+  const isSearchMode = searchResults !== null;
+
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Products</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">Products</h1>
+        <div className="relative w-72">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search products…"
+            className="w-full border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10"
+          />
+          {searching && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">
+              …
+            </span>
+          )}
+          {searchQuery && !searching && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
 
-      {loading && (
+      {isSearchMode && (
+        <p className="text-sm text-gray-500 mb-4">
+          {displayProducts.length} result{displayProducts.length !== 1 ? "s" : ""} for &ldquo;{searchQuery}&rdquo;
+        </p>
+      )}
+
+      {loading && !isSearchMode && (
         <div className="flex items-center justify-center h-48 text-gray-400">
           Loading products…
         </div>
@@ -58,22 +113,24 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {!loading && !error && products.length === 0 && (
+      {!loading && !error && displayProducts.length === 0 && (
         <div className="text-center text-gray-400 py-16">
-          <p className="text-lg">No products found.</p>
-          <p className="text-sm mt-1">
-            Add some via the API or check that LocalStack is running.
-          </p>
+          <p className="text-lg">{isSearchMode ? "No results found." : "No products found."}</p>
+          {!isSearchMode && (
+            <p className="text-sm mt-1">
+              Add some via the API or check that LocalStack is running.
+            </p>
+          )}
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-        {products.map((p) => (
+        {displayProducts.map((p) => (
           <ProductCard key={p.productId} product={p} userId={userId} />
         ))}
       </div>
 
-      {nextKey && (
+      {!isSearchMode && nextKey && (
         <div className="mt-8 text-center">
           <button
             onClick={loadMore}

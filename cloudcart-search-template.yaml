@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '[DEV] OpenSearch domain + Lambda search service for CloudCart'
+
+Parameters:
+  ProductsTableStreamArn:
+    Type: String
+    Description: "DynamoDB stream ARN for ProductsTableDev (LocalStack returns unknown via CF, so passed explicitly)"
+
+Resources:
+
+  ### OpenSearch Domain ###
+  SearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: cloudcart-search-dev
+      EngineVersion: OpenSearch_2.13
+      ClusterConfig:
+        InstanceType: t3.small.search
+        InstanceCount: 1
+      EBSOptions:
+        EBSEnabled: true
+        VolumeType: gp2
+        VolumeSize: 10
+
+  ### IAM Role ###
+  LambdaExecutionRoleSearch:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaExecutionRoleSearch
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SearchServiceAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:DescribeStream
+                  - dynamodb:ListStreams
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                Resource: !Sub
+                  - "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}"
+                  - TableName: !ImportValue cloudcart-products-ProductsTableName
+              - Effect: Allow
+                Action:
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                  - es:ESHttpDelete
+                  - es:ESHttpHead
+                Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/cloudcart-search-dev/*"
+    DependsOn: SearchDomain
+
+  ### Lambda Functions ###
+  StreamIndexFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: StreamIndexFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.search.handler.StreamIndexHandler::handleRequest
+      Role: !GetAtt LambdaExecutionRoleSearch.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: search-service-1.0.0.jar
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          OPENSEARCH_ENDPOINT: !Sub "http://${SearchDomain.DomainEndpoint}"
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  SearchProductsFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: SearchProductsFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.search.handler.SearchProductsHandler::handleRequest
+      Role: !GetAtt LambdaExecutionRoleSearch.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: search-service-1.0.0.jar
+      Timeout: 20
+      MemorySize: 256
+      Environment:
+        Variables:
+          OPENSEARCH_ENDPOINT: !Sub "http://${SearchDomain.DomainEndpoint}"
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  BulkReindexFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: BulkReindexFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.search.handler.BulkReindexHandler::handleRequest
+      Role: !GetAtt LambdaExecutionRoleSearch.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: search-service-1.0.0.jar
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          OPENSEARCH_ENDPOINT: !Sub "http://${SearchDomain.DomainEndpoint}"
+          PRODUCTS_TABLE: !ImportValue cloudcart-products-ProductsTableName
+          AWS_ENDPOINT_URL: http://host.docker.internal:4566
+
+  ### DynamoDB Stream Event Source Mapping ###
+  ProductStreamEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Ref ProductsTableStreamArn
+      FunctionName: !GetAtt StreamIndexFunctionDev.Arn
+      StartingPosition: TRIM_HORIZON
+      BisectBatchOnFunctionError: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      BatchSize: 10
+
+Outputs:
+  SearchProductsFunctionArn:
+    Value: !GetAtt SearchProductsFunctionDev.Arn
+    Export:
+      Name: cloudcart-search-SearchProductsFunctionArn
+
+  BulkReindexFunctionArn:
+    Value: !GetAtt BulkReindexFunctionDev.Arn
+    Export:
+      Name: cloudcart-search-BulkReindexFunctionArn
+
+  OpenSearchEndpoint:
+    Description: "OpenSearch domain endpoint"
+    Value: !Sub "http://${SearchDomain.DomainEndpoint}"
