@@ -18,12 +18,9 @@ export default function RootLayout({
 
   useEffect(() => {
     setMounted(true);
-    const stored = localStorage.getItem("cc_user_id");
-    if (stored) {
-      setUserId(stored);
-    } else {
-      setShowPrompt(true);
-    }
+    const stored = localStorage.getItem("cc_user_id") || "userid4";
+    localStorage.setItem("cc_user_id", stored);
+    setUserId(stored);
   }, []);
 
   function handleSetUser() {
