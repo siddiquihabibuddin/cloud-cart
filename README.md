@@ -217,17 +217,17 @@ PENDING → FAILED
 
 ## Screenshots
 
-### Product Search
-![Product Search](screenshots/search.png)
-
 ### Product Listing
 ![Product Listing](screenshots/product-listing.png)
 
+### Product Search
+![Product Search](screenshots/search.png)
+
 ### Cart
-![Cart](screenshots/cart.png?raw=true)
+![Cart](screenshots/cart.png)
 
 ### Checkout
-![Checkout](screenshots/checkout.png?raw=true)
+![Checkout](screenshots/checkout.png)
 
 ### Order Placed
 ![Order Placed](screenshots/place-order.png)
@@ -390,6 +390,6 @@ Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` vi
 ## Tech Stack
 
 - **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch, API Gateway (REST v1)
-- **Frontend**: Next.js, TypeScript, Tailwind CSS, Axios
+- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios
 - **Infrastructure**: AWS CloudFormation, LocalStack Pro
 - **Build**: Maven (Shade plugin for fat JARs)

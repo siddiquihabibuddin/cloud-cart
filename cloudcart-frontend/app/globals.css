@@ -1,26 +1,233 @@
 @import "tailwindcss";
 
+/* ── Design Tokens ──────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Brand palette */
+  --cc-violet:        #7c3aed;  /* violet-600 */
+  --cc-violet-light:  #a78bfa;  /* violet-400 */
+  --cc-violet-dark:   #5b21b6;  /* violet-800 */
+  --cc-electric:      #6366f1;  /* indigo-500 */
+  --cc-orange:        #f97316;  /* orange-500 */
+  --cc-orange-light:  #fb923c;  /* orange-400 */
+  --cc-cyan:          #06b6d4;  /* cyan-500 */
+  --cc-pink:          #ec4899;  /* pink-500 */
+  --cc-emerald:       #059669;  /* emerald-600 */
+
+  /* Surfaces — tinted, never stark white */
+  --cc-surface:       #fdfcff;  /* near-white with violet warmth */
+  --cc-surface-2:     #f5f3ff;  /* violet tint */
+  --cc-surface-3:     #ede9fe;  /* deeper violet tint */
+  --cc-surface-card:  #faf8ff;  /* card bg — slight violet cast */
+  --cc-border:        #ddd6fe;  /* violet-200 — richer than gray */
+  --cc-border-vivid:  #c4b5fd;  /* violet-300 */
+
+  /* Text — all pass WCAG AA on light surfaces */
+  --cc-text-primary:  #1a1033;  /* near-black with violet tint */
+  --cc-text-secondary:#2d1f6e;  /* dark violet — 8:1+ on white */
+  --cc-text-muted:    #4a3d7a;  /* dark enough for AA (5.5:1 on #faf8ff) */
+  --cc-text-on-dark:  #f0ebff;  /* bright cream for dark surfaces */
+
+  /* Dark backgrounds — deep indigo, NOT black */
+  --cc-dark-bg:       #0f0a2e;  /* very deep violet-black */
+  --cc-dark-surface:  #1a1040;  /* slightly lighter dark */
+
+  /* Gradients */
+  --cc-grad-brand:    linear-gradient(135deg, #7c3aed 0%, #6366f1 50%, #06b6d4 100%);
+  --cc-grad-orange:   linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+  --cc-grad-card:     linear-gradient(145deg, #f5f3ff 0%, #ede9fe 100%);
+  --cc-grad-dark:     linear-gradient(135deg, #0f0a2e 0%, #1e1b4b 55%, #2d2580 100%);
+  --cc-grad-header:   linear-gradient(135deg, #150d3a 0%, #1e1b4b 50%, #2d2580 100%);
+  --cc-grad-page:     linear-gradient(160deg, #f5f3ff 0%, #ede9fe 40%, #e0d9ff 100%);
+  --cc-grad-danger:   linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+
+  /* Shadows — stronger glow for better button pop */
+  --cc-shadow-sm:     0 1px 3px rgba(124,58,237,0.10), 0 1px 2px rgba(0,0,0,0.05);
+  --cc-shadow-md:     0 4px 16px rgba(124,58,237,0.20), 0 2px 6px rgba(0,0,0,0.08);
+  --cc-shadow-lg:     0 8px 32px rgba(124,58,237,0.28), 0 4px 12px rgba(0,0,0,0.10);
+  --cc-shadow-glow:   0 0 0 3px rgba(124,58,237,0.30);
+  --cc-shadow-btn:    0 4px 14px rgba(124,58,237,0.45);
+  --cc-shadow-btn-orange: 0 4px 14px rgba(249,115,22,0.45);
+  --cc-shadow-btn-red:    0 4px 14px rgba(220,38,38,0.40);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Base ───────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--cc-grad-page);
+  color: var(--cc-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--cc-border-vivid); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--cc-violet-light); }
+
+/* ── Focus ring ─────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--cc-violet);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Utility animations ─────────────────────────────────────── */
+@keyframes cc-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cc-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cc-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+  70%  { box-shadow: 0 0 0 8px rgba(124, 58, 237, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+}
+
+@keyframes cc-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes cc-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.cc-fade-up     { animation: cc-fade-up 0.35s ease both; }
+.cc-scale-in    { animation: cc-scale-in 0.2s ease both; }
+.cc-pulse-ring  { animation: cc-pulse-ring 1.8s ease-out infinite; }
+.cc-spin        { animation: cc-spin 0.8s linear infinite; }
+
+/* Shimmer skeleton */
+.cc-skeleton {
+  background: linear-gradient(90deg, #ede9fe 25%, #c4b5fd 50%, #ede9fe 75%);
+  background-size: 800px 100%;
+  animation: cc-shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Glass card ─────────────────────────────────────────────── */
+.cc-glass {
+  background: rgba(255,255,255,0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.5);
+}
+
+/* ── Gradient text ──────────────────────────────────────────── */
+.cc-gradient-text {
+  background: var(--cc-grad-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.cc-gradient-text-orange {
+  background: var(--cc-grad-orange);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Button utilities ───────────────────────────────────────── */
+/* Primary: bold brand gradient, strong glow shadow */
+.cc-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--cc-grad-brand);
+  box-shadow: var(--cc-shadow-btn);
+  border: none;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+  text-decoration: none;
+}
+.cc-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 6px 20px rgba(124,58,237,0.55);
+}
+.cc-btn-primary:active:not(:disabled) {
+  transform: scale(0.97);
+  box-shadow: var(--cc-shadow-md);
+}
+.cc-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Secondary: vivid violet border + colored text, tinted bg */
+.cc-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.125rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--cc-violet-dark);
+  background: var(--cc-surface-3);
+  border: 1.5px solid var(--cc-border-vivid);
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
+  text-decoration: none;
+}
+.cc-btn-secondary:hover:not(:disabled) {
+  background: var(--cc-surface-2);
+  border-color: var(--cc-violet);
+  color: var(--cc-violet);
+  box-shadow: var(--cc-shadow-sm);
+  transform: translateY(-1px);
+}
+.cc-btn-secondary:active:not(:disabled) { transform: scale(0.97); }
+.cc-btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Danger: vivid red gradient */
+.cc-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.375rem;
+  border-radius: 0.5rem;
+  color: #dc2626;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+.cc-btn-danger:hover:not(:disabled) {
+  color: #ffffff;
+  background: var(--cc-grad-danger);
+  box-shadow: var(--cc-shadow-btn-red);
+  transform: scale(1.05);
+}
+.cc-btn-danger:active:not(:disabled) { transform: scale(0.95); }
+.cc-btn-danger:disabled {
+  opacity: 0.40;
+  cursor: not-allowed;
 }
