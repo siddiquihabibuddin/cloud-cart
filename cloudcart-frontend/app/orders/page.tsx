@@ -122,7 +122,9 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setUserId(localStorage.getItem("cc_user_id"));
+    const stored = localStorage.getItem("cc_user_id") || "userid4";
+    localStorage.setItem("cc_user_id", stored);
+    setUserId(stored);
   }, []);
 
   const fetchOrders = useCallback(async (uid: string) => {

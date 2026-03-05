@@ -17,7 +17,7 @@ export default function ProductsPage() {
   const searchCounterRef = useRef(0);
 
   useEffect(() => {
-    setUserId(localStorage.getItem("cc_user_id"));
+    const _uid = localStorage.getItem("cc_user_id") || "userid4"; localStorage.setItem("cc_user_id", _uid); setUserId(_uid);
   }, []);
 
   useEffect(() => {
