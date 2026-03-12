@@ -112,7 +112,6 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       userId: this.userService.userId(),
       items: this.cartItems().map(i => ({
         productId: i.productId,
-        productName: i.productName,
         quantity: i.quantity,
         price: i.price
       }))
@@ -139,7 +138,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         this.stopPolling();
         return;
       }
-      this.orderService.getOrder(orderId).subscribe({
+      this.orderService.getOrder(orderId, this.userService.userId()).subscribe({
         next: (order) => {
           this.orderData.set(order);
           this.orderStatus.set(order.status);

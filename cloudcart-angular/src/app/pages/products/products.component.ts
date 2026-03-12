@@ -28,7 +28,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
   private searchSubject = new Subject<string>();
   private sub!: Subscription;
 
-  skeletons = Array(12).fill(0);
+  readonly skeletons = Array(12).fill(0);
 
   ngOnInit(): void {
     this.loadProducts();
@@ -64,8 +64,8 @@ export class ProductsComponent implements OnInit, OnDestroy {
     this.error.set(null);
     this.productService.listProducts(12).subscribe({
       next: (res) => {
-        this.products.set(res.items ?? []);
-        this.lastKey.set(res.lastKey ?? null);
+        this.products.set(res.products ?? []);
+        this.lastKey.set(res.nextKey ?? null);
         this.loading.set(false);
       },
       error: () => {
@@ -80,8 +80,8 @@ export class ProductsComponent implements OnInit, OnDestroy {
     this.loadingMore.set(true);
     this.productService.listProducts(12, this.lastKey()).subscribe({
       next: (res) => {
-        this.products.update(p => [...p, ...(res.items ?? [])]);
-        this.lastKey.set(res.lastKey ?? null);
+        this.products.update(p => [...p, ...(res.products ?? [])]);
+        this.lastKey.set(res.nextKey ?? null);
         this.loadingMore.set(false);
       },
       error: () => this.loadingMore.set(false)

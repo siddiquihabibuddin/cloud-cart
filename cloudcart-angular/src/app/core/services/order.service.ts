@@ -17,8 +17,9 @@ export class OrderService {
     });
   }
 
-  getOrder(orderId: string): Observable<Order> {
-    return this.http.get<Order>(`${this.base}/orders/${orderId}`);
+  getOrder(orderId: string, userId: string): Observable<Order> {
+    const params = new HttpParams().set('userId', userId);
+    return this.http.get<Order>(`${this.base}/orders/${orderId}`, { params });
   }
 
   listOrders(userId: string): Observable<Order[]> {

@@ -1,7 +1,7 @@
 export interface CartItem {
   userId: string;
   productId: string;
-  productName: string;
+  title: string;
   price: number;
   quantity: number;
 }
@@ -9,7 +9,7 @@ export interface CartItem {
 export interface AddToCartRequest {
   userId: string;
   productId: string;
-  productName: string;
+  title: string;
   price: number;
   quantity: number;
 }

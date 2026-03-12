@@ -17,6 +17,6 @@ export class AppComponent implements OnInit {
   userService = inject(UserService);
 
   ngOnInit(): void {
-    this.cartService.refreshCount();
+    this.cartService.loadCart();
   }
 }

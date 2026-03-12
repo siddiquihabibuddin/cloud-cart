@@ -39,8 +39,12 @@ public class ProductRepository {
         item.put("title", AttributeValue.fromS(product.getTitle()));
         item.put("price", AttributeValue.fromN(String.valueOf(product.getPrice())));
         item.put("stock", AttributeValue.fromN(String.valueOf(product.getStock())));
-        item.put("category", AttributeValue.fromS(product.getCategory()));
-        item.put("imageUrl", AttributeValue.fromS(product.getImageUrl()));
+        if (product.getCategory() != null && !product.getCategory().isEmpty()) {
+            item.put("category", AttributeValue.fromS(product.getCategory()));
+        }
+        if (product.getImageUrl() != null && !product.getImageUrl().isEmpty()) {
+            item.put("imageUrl", AttributeValue.fromS(product.getImageUrl()));
+        }
 
         PutItemRequest request = PutItemRequest.builder()
                 .tableName(tableName)
@@ -71,8 +75,8 @@ public Product getProductById(String productId) {
     product.setTitle(returnedItem.get("title").s());
     product.setPrice(Double.parseDouble(returnedItem.get("price").n()));
     product.setStock(Integer.parseInt(returnedItem.get("stock").n()));
-    product.setCategory(returnedItem.get("category").s());
-    product.setImageUrl(returnedItem.get("imageUrl").s());
+    if (returnedItem.containsKey("category")) product.setCategory(returnedItem.get("category").s());
+    if (returnedItem.containsKey("imageUrl")) product.setImageUrl(returnedItem.get("imageUrl").s());
 
     return product;
     }
@@ -97,8 +101,8 @@ public Product getProductById(String productId) {
             product.setTitle(item.get("title").s());
             product.setPrice(Double.parseDouble(item.get("price").n()));
             product.setStock(Integer.parseInt(item.get("stock").n()));
-            product.setCategory(item.get("category").s());
-            product.setImageUrl(item.get("imageUrl").s());
+            if (item.containsKey("category")) product.setCategory(item.get("category").s());
+            if (item.containsKey("imageUrl")) product.setImageUrl(item.get("imageUrl").s());
             productList.add(product);
         }
     

@@ -155,7 +155,7 @@
                 <div class="mb-3 space-y-1">
                   @for (item of order.items; track item.productId) {
                     <div class="flex justify-between text-xs" style="color: #a78bfa;">
-                      <span>{{ item.productName }} &times; {{ item.quantity }}</span>
+                      <span>{{ item.productId }} &times; {{ item.quantity }}</span>
                       <span>${{ (item.price * item.quantity).toFixed(2) }}</span>
                     </div>
                   }
@@ -172,7 +172,7 @@
                   {{ formatDate(order.createdAt) }}
                 </div>
                 <span class="text-xl font-black cc-gradient-text">
-                  ${{ (order.totalAmount ?? 0).toFixed(2) }}
+                  ${{ order.totalAmount.toFixed(2) }}
                 </span>
               </div>
 

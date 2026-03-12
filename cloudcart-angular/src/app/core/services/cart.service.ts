@@ -28,17 +28,34 @@ export class CartService {
   }
 
   addItem(item: AddToCartRequest): void {
+    // Optimistic update
+    const existing = this.cartItems().find(i => i.productId === item.productId);
+    if (existing) {
+      this.cartItems.update(items =>
+        items.map(i => i.productId === item.productId ? { ...i, quantity: i.quantity + item.quantity } : i)
+      );
+    } else {
+      this.cartItems.update(items => [...items, item as CartItem]);
+    }
+    this.cartCount.set(this.cartItems().reduce((sum, i) => sum + i.quantity, 0));
+
     this.http.post(`${this.base}/cart`, item).subscribe({
       next: () => this.loadCart(),
-      error: (err) => console.error('Add to cart failed', err)
+      error: () => this.loadCart() // revert on error
     });
   }
 
   updateQty(productId: string, quantity: number): void {
     const userId = this.userService.userId();
+    // Optimistic update
+    this.cartItems.update(items =>
+      items.map(i => i.productId === productId ? { ...i, quantity } : i)
+    );
+    this.cartCount.set(this.cartItems().reduce((sum, i) => sum + i.quantity, 0));
+
     this.http.patch(`${this.base}/cart/${userId}/${productId}`, { quantity }).subscribe({
       next: () => this.loadCart(),
-      error: (err) => console.error('Update qty failed', err)
+      error: () => this.loadCart() // revert on error
     });
   }
 

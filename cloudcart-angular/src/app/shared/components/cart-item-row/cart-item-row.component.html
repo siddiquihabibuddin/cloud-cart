@@ -23,7 +23,7 @@
   <!-- Title & price per unit -->
   <div class="flex-1 min-w-0">
     <p class="font-semibold text-sm leading-snug truncate" style="color: #e0d9ff;">
-      {{ item.productName || item.productId }}
+      {{ item.title || item.productId }}
     </p>
     <p class="text-xs mt-0.5" style="color: #7c6fb0;">
       ${{ item.price.toFixed(2) }} each
@@ -75,7 +75,7 @@
     style="color: #dc2626; background: rgba(220,38,38,0.12); border: 1px solid rgba(220,38,38,0.3);"
     (mouseenter)="setRemoveHover($event, true)"
     (mouseleave)="setRemoveHover($event, false)"
-    [attr.aria-label]="'Remove ' + item.productName + ' from cart'"
+    [attr.aria-label]="'Remove ' + item.title + ' from cart'"
     title="Remove item"
   >
     <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">

@@ -1,15 +1,16 @@
 export interface Product {
-  productID: string;
+  productId: string;
   title: string;
   description?: string;
   price: number;
   stock: number;
   category?: string;
+  imageUrl?: string;
 }
 
 export interface ProductListResponse {
-  items: Product[];
-  lastKey?: string;
+  products: Product[];
+  nextKey?: string;
 }
 
 export interface SearchResponse {

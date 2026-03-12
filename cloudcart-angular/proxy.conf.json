@@ -1,25 +1,25 @@
 {
   "/api-products": {
-    "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_",
-    "pathRewrite": {"^/api-products": "/products"},
+    "target": "http://localhost:4566/restapis/0wiutxqegy/dev/_user_request_",
+    "pathRewrite": {"^/api-products": ""},
     "changeOrigin": true,
     "logLevel": "debug"
   },
   "/api-cart": {
-    "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_",
-    "pathRewrite": {"^/api-cart": "/cart"},
+    "target": "http://localhost:4566/restapis/0wiutxqegy/dev/_user_request_",
+    "pathRewrite": {"^/api-cart": ""},
     "changeOrigin": true,
     "logLevel": "debug"
   },
   "/api-orders": {
-    "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_",
-    "pathRewrite": {"^/api-orders": "/orders"},
+    "target": "http://localhost:4566/restapis/0wiutxqegy/dev/_user_request_",
+    "pathRewrite": {"^/api-orders": ""},
     "changeOrigin": true,
     "logLevel": "debug"
   },
   "/api-search": {
-    "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_",
-    "pathRewrite": {"^/api-search": "/search"},
+    "target": "http://localhost:4566/restapis/0wiutxqegy/dev/_user_request_",
+    "pathRewrite": {"^/api-search": ""},
     "changeOrigin": true,
     "logLevel": "debug"
   }

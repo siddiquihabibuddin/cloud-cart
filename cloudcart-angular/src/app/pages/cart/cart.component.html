@@ -102,7 +102,7 @@
             @for (item of cartService.cartItems(); track item.productId) {
               <div class="flex justify-between text-sm">
                 <span class="truncate max-w-40" style="color: #a78bfa;">
-                  {{ item.productName || item.productId }}
+                  {{ item.title || item.productId }}
                   <span style="color: #7c6fb0;">&times;{{ item.quantity }}</span>
                 </span>
                 <span class="font-semibold" style="color: #e0d9ff;">
