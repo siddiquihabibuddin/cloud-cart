@@ -1,0 +1,68 @@
+<div
+  class="fixed inset-0 z-50 flex items-center justify-center p-4"
+  style="background: rgba(15,10,30,0.8); backdrop-filter: blur(8px);"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="welcome-heading"
+>
+  <div
+    class="w-full max-w-sm rounded-3xl overflow-hidden cc-scale-in"
+    style="box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(124,58,237,0.3);"
+  >
+    <!-- Gradient header band -->
+    <div class="h-2 w-full" style="background: var(--cc-grad-brand);" aria-hidden="true"></div>
+
+    <div class="p-8" style="background: rgba(15,10,40,0.98); border: 1px solid rgba(124,58,237,0.25); border-top: none;">
+      <!-- Icon -->
+      <div
+        class="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-2xl font-black mb-5 shadow-lg"
+        style="background: var(--cc-grad-brand);"
+        aria-hidden="true"
+      >C</div>
+
+      <h2 id="welcome-heading" class="text-2xl font-black mb-2" style="color: #f0ebff;">
+        Welcome to <span class="cc-gradient-text">CloudCart</span>
+      </h2>
+      <p class="text-sm mb-6" style="color: #a78bfa;">
+        Enter a user ID to get started — this identifies your shopping session
+        (e.g. <strong style="color: #c4b5fd;">userid4</strong> for demo data).
+      </p>
+
+      <div class="space-y-3">
+        <input
+          [ngModel]="inputUserId()"
+          (ngModelChange)="inputUserId.set($event)"
+          (keyup.enter)="submit()"
+          placeholder="Your user ID&hellip;"
+          class="w-full px-4 py-3 text-sm rounded-xl transition-all duration-150"
+          style="background: rgba(30,27,75,0.7); border: 1.5px solid rgba(124,58,237,0.35); color: #f0ebff; outline: none;"
+          (focus)="onInputFocus($event)"
+          (blur)="onInputBlur($event)"
+          aria-label="User ID"
+          autofocus
+        />
+
+        <button
+          (click)="submit()"
+          [disabled]="!inputUserId().trim()"
+          class="w-full py-3 rounded-xl text-sm font-bold text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+          [style]="inputUserId().trim() ? 'background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);' : 'background: linear-gradient(135deg, #374151, #4b5563);'"
+          (mouseenter)="onBtnHover($event, true)"
+          (mouseleave)="onBtnHover($event, false)"
+        >
+          Start Shopping
+        </button>
+
+        <button
+          (click)="dismiss()"
+          class="w-full py-2 rounded-xl text-xs font-medium transition-colors duration-150"
+          style="color: #7c6fb0;"
+          (mouseenter)="$any($event.target).style.color = '#a78bfa'"
+          (mouseleave)="$any($event.target).style.color = '#7c6fb0'"
+        >
+          Skip for now
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

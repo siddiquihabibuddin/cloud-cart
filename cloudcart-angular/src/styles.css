@@ -1,0 +1,266 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design Tokens ──────────────────────────────────────────── */
+:root {
+  /* Brand palette */
+  --cc-violet:        #7c3aed;
+  --cc-violet-light:  #a78bfa;
+  --cc-violet-dark:   #5b21b6;
+  --cc-electric:      #6366f1;
+  --cc-orange:        #f97316;
+  --cc-orange-light:  #fb923c;
+  --cc-cyan:          #06b6d4;
+  --cc-pink:          #ec4899;
+  --cc-emerald:       #059669;
+
+  /* Dark surfaces — deep indigo, NOT black */
+  --cc-dark-bg:       #030712;
+  --cc-dark-surface:  #0f172a;
+  --cc-dark-card:     #1e1b4b;
+  --cc-dark-card-2:   #1a1040;
+  --cc-dark-border:   rgba(99, 102, 241, 0.25);
+  --cc-dark-border-vivid: rgba(124, 58, 237, 0.45);
+
+  /* Gradients */
+  --cc-grad-brand:    linear-gradient(135deg, #7c3aed 0%, #6366f1 50%, #06b6d4 100%);
+  --cc-grad-orange:   linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+  --cc-grad-dark:     linear-gradient(135deg, #0f0a2e 0%, #1e1b4b 55%, #2d2580 100%);
+  --cc-grad-header:   linear-gradient(135deg, #150d3a 0%, #1e1b4b 50%, #2d2580 100%);
+  --cc-grad-page:     linear-gradient(160deg, #030712 0%, #0f0a2e 50%, #1a1040 100%);
+  --cc-grad-danger:   linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+  --cc-grad-emerald:  linear-gradient(135deg, #059669 0%, #10b981 100%);
+
+  /* Shadows */
+  --cc-shadow-sm:     0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --cc-shadow-md:     0 4px 16px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --cc-shadow-lg:     0 8px 32px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --cc-shadow-violet: 0 0 20px rgba(124, 58, 237, 0.4);
+  --cc-shadow-btn:    0 4px 14px rgba(124, 58, 237, 0.55);
+  --cc-shadow-btn-orange: 0 4px 14px rgba(249, 115, 22, 0.55);
+  --cc-shadow-btn-red:    0 4px 14px rgba(220, 38, 38, 0.45);
+  --cc-shadow-glow:   0 0 0 3px rgba(124, 58, 237, 0.35);
+
+  /* Text — on dark backgrounds */
+  --cc-text-on-dark:       #f0ebff;
+  --cc-text-on-dark-muted: #a78bfa;
+  --cc-text-on-dark-dim:   #7c6fb0;
+}
+
+/* ── Base ───────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--cc-grad-page);
+  color: #f0ebff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(124, 58, 237, 0.4); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(167, 139, 250, 0.6); }
+
+/* ── Focus ring ─────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--cc-violet-light);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Animation keyframes ─────────────────────────────────────── */
+@keyframes cc-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cc-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cc-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.7); }
+  70%  { box-shadow: 0 0 0 8px rgba(124, 58, 237, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+}
+
+@keyframes cc-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes cc-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+/* ── Animation utility classes ──────────────────────────────── */
+.cc-fade-up    { animation: cc-fade-up 0.35s ease both; }
+.cc-scale-in   { animation: cc-scale-in 0.2s ease both; }
+.cc-pulse-ring { animation: cc-pulse-ring 1.8s ease-out infinite; }
+.cc-spin       { animation: cc-spin 0.8s linear infinite; }
+
+/* Shimmer skeleton — dark variant */
+.cc-skeleton {
+  background: linear-gradient(90deg, #1e1b4b 25%, #312e81 50%, #1e1b4b 75%);
+  background-size: 800px 100%;
+  animation: cc-shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Glass card ─────────────────────────────────────────────── */
+.cc-glass {
+  background: rgba(30, 27, 75, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(124, 58, 237, 0.25);
+}
+
+/* ── Gradient text ──────────────────────────────────────────── */
+.cc-gradient-text {
+  background: var(--cc-grad-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.cc-gradient-text-orange {
+  background: var(--cc-grad-orange);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Button utilities ───────────────────────────────────────── */
+.cc-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--cc-grad-brand);
+  box-shadow: var(--cc-shadow-btn);
+  border: none;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+  text-decoration: none;
+}
+.cc-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.7);
+}
+.cc-btn-primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.cc-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.cc-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.125rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #a78bfa;
+  background: rgba(124, 58, 237, 0.12);
+  border: 1.5px solid rgba(124, 58, 237, 0.35);
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
+  text-decoration: none;
+}
+.cc-btn-secondary:hover:not(:disabled) {
+  background: rgba(124, 58, 237, 0.22);
+  border-color: rgba(124, 58, 237, 0.55);
+  color: #c4b5fd;
+  box-shadow: var(--cc-shadow-violet);
+  transform: translateY(-1px);
+}
+.cc-btn-secondary:active:not(:disabled) { transform: scale(0.97); }
+.cc-btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.cc-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.375rem;
+  border-radius: 0.5rem;
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+.cc-btn-danger:hover:not(:disabled) {
+  color: #ffffff;
+  background: var(--cc-grad-danger);
+  box-shadow: var(--cc-shadow-btn-red);
+  transform: scale(1.05);
+  border-color: transparent;
+}
+.cc-btn-danger:active:not(:disabled) { transform: scale(0.95); }
+.cc-btn-danger:disabled { opacity: 0.40; cursor: not-allowed; }
+
+/* ── Card styles ────────────────────────────────────────────── */
+.cc-card {
+  background: rgba(30, 27, 75, 0.6);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 1rem;
+  box-shadow: var(--cc-shadow-md);
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+
+.cc-card:hover {
+  border-color: rgba(124, 58, 237, 0.45);
+  box-shadow: var(--cc-shadow-lg), 0 0 0 1px rgba(124, 58, 237, 0.2);
+}
+
+/* ── Input ──────────────────────────────────────────────────── */
+.cc-input {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(30, 27, 75, 0.6);
+  border: 1.5px solid rgba(99, 102, 241, 0.3);
+  color: #f0ebff;
+  font-size: 0.875rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  outline: none;
+}
+.cc-input::placeholder { color: #7c6fb0; }
+.cc-input:focus {
+  border-color: var(--cc-violet);
+  box-shadow: var(--cc-shadow-glow);
+}
+
+/* ── Status badge base ──────────────────────────────────────── */
+.cc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
