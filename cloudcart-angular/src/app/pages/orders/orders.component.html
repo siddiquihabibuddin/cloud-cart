@@ -4,23 +4,21 @@
   <div class="flex items-center justify-between mb-8">
     <div>
       <h1 class="text-3xl font-black" style="color: #f0ebff;">My Orders</h1>
-      @if (!loading() && orders().length > 0) {
-        <p class="text-sm mt-0.5" style="color: #7c6fb0;">
-          {{ orders().length }} order{{ orders().length !== 1 ? 's' : '' }} found
-        </p>
-      }
+      <p *ngIf="!loading && orders.length > 0" class="text-sm mt-0.5" style="color: #7c6fb0;">
+        {{ orders.length }} order{{ orders.length !== 1 ? 's' : '' }} found
+      </p>
     </div>
 
     <button
       (click)="loadOrders(true)"
-      [disabled]="loading() || refreshing()"
+      [disabled]="loading || refreshing"
       class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-150 disabled:opacity-50 hover:-translate-y-0.5 hover:scale-[1.02]"
       style="color: #a78bfa; background: rgba(124,58,237,0.12); border: 1.5px solid rgba(124,58,237,0.3);"
       aria-label="Refresh orders"
     >
       <svg
         class="w-3.5 h-3.5"
-        [class.cc-spin]="loading() || refreshing()"
+        [class.cc-spin]="loading || refreshing"
         fill="none"
         stroke="currentColor"
         stroke-width="2.5"
@@ -29,172 +27,163 @@
       >
         <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
       </svg>
-      {{ (loading() || refreshing()) ? 'Refreshing&hellip;' : 'Refresh' }}
+      {{ (loading || refreshing) ? 'Refreshing\u2026' : 'Refresh' }}
     </button>
   </div>
 
   <!-- Error -->
-  @if (error()) {
-    <div
-      class="flex items-start gap-3 px-5 py-4 rounded-2xl border text-sm mb-6"
-      style="background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.35); color: #fca5a5;"
-      role="alert"
-    >
-      <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" />
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01" />
-      </svg>
-      <div>
-        <p>{{ error() }}</p>
-        <button (click)="loadOrders()" class="mt-1 font-bold underline underline-offset-2 hover:opacity-80">
-          Try again
-        </button>
-      </div>
+  <div
+    *ngIf="error"
+    class="flex items-start gap-3 px-5 py-4 rounded-2xl border text-sm mb-6"
+    style="background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.35); color: #fca5a5;"
+    role="alert"
+  >
+    <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01" />
+    </svg>
+    <div>
+      <p>{{ error }}</p>
+      <button (click)="loadOrders()" class="mt-1 font-bold underline underline-offset-2 hover:opacity-80">
+        Try again
+      </button>
     </div>
-  }
+  </div>
 
   <!-- Skeleton loading -->
-  @if (loading() && !refreshing()) {
-    <div class="flex flex-col gap-3" aria-busy="true" aria-label="Loading orders">
-      @for (s of [1,2,3]; track s) {
-        <div
-          class="rounded-2xl px-6 py-5"
-          style="background: rgba(20,16,60,0.7); border: 1px solid rgba(99,102,241,0.2);"
-        >
-          <div class="flex items-start justify-between mb-4">
-            <div class="space-y-2">
-              <div class="h-3 cc-skeleton rounded-full w-16"></div>
-              <div class="h-5 cc-skeleton rounded-full w-36"></div>
-            </div>
-            <div class="h-6 cc-skeleton rounded-full w-24"></div>
-          </div>
-          <div class="flex items-center justify-between">
-            <div class="h-4 cc-skeleton rounded-full w-28"></div>
-            <div class="h-6 cc-skeleton rounded-full w-20"></div>
-          </div>
+  <div *ngIf="loading && !refreshing" class="flex flex-col gap-3" aria-busy="true" aria-label="Loading orders">
+    <div
+      *ngFor="let s of [1,2,3]; trackBy: trackByIndex"
+      class="rounded-2xl px-6 py-5"
+      style="background: rgba(20,16,60,0.7); border: 1px solid rgba(99,102,241,0.2);"
+    >
+      <div class="flex items-start justify-between mb-4">
+        <div class="space-y-2">
+          <div class="h-3 cc-skeleton rounded-full w-16"></div>
+          <div class="h-5 cc-skeleton rounded-full w-36"></div>
         </div>
-      }
+        <div class="h-6 cc-skeleton rounded-full w-24"></div>
+      </div>
+      <div class="flex items-center justify-between">
+        <div class="h-4 cc-skeleton rounded-full w-28"></div>
+        <div class="h-6 cc-skeleton rounded-full w-20"></div>
+      </div>
     </div>
-  }
+  </div>
 
   <!-- Empty state -->
-  @if (!loading() && !error() && orders().length === 0) {
+  <div
+    *ngIf="!loading && !error && orders.length === 0"
+    class="flex flex-col items-center justify-center py-24 rounded-3xl border"
+    style="border-color: rgba(124,58,237,0.35); background: rgba(30,27,75,0.4);"
+  >
     <div
-      class="flex flex-col items-center justify-center py-24 rounded-3xl border"
-      style="border-color: rgba(124,58,237,0.35); background: rgba(30,27,75,0.4);"
+      class="w-20 h-20 rounded-2xl flex items-center justify-center mb-6"
+      style="background: var(--cc-grad-brand);"
+      aria-hidden="true"
     >
-      <div
-        class="w-20 h-20 rounded-2xl flex items-center justify-center mb-6"
-        style="background: var(--cc-grad-brand);"
-        aria-hidden="true"
-      >
-        <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-        </svg>
-      </div>
-      <p class="text-xl font-black mb-2" style="color: #f0ebff;">No orders yet</p>
-      <p class="text-sm mb-6" style="color: #a78bfa;">Your placed orders will appear here once you check out.</p>
-      <a
-        routerLink="/"
-        class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
-        style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
-        </svg>
-        Browse products
-      </a>
+      <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+      </svg>
     </div>
-  }
+    <p class="text-xl font-black mb-2" style="color: #f0ebff;">No orders yet</p>
+    <p class="text-sm mb-6" style="color: #a78bfa;">Your placed orders will appear here once you check out.</p>
+    <a
+      routerLink="/"
+      class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
+      style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
+    >
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
+      </svg>
+      Browse products
+    </a>
+  </div>
 
   <!-- Orders list -->
-  @if (!loading() && orders().length > 0) {
-    <div class="flex flex-col gap-3">
-      @for (order of orders(); track order.orderId; let i = $index) {
-        <article
-          class="rounded-2xl overflow-hidden cc-fade-up"
-          [style.animation-delay]="i * 60 + 'ms'"
-          style="background: rgba(20,16,60,0.7); border: 1px solid rgba(99,102,241,0.2); box-shadow: 0 4px 16px rgba(0,0,0,0.4);"
-        >
-          <!-- Left color accent based on status -->
-          <div class="flex items-stretch">
+  <div *ngIf="!loading && orders.length > 0" class="flex flex-col gap-3">
+    <article
+      *ngFor="let order of orders; let i = index; trackBy: trackByOrderId"
+      class="rounded-2xl overflow-hidden cc-fade-up"
+      [style.animation-delay]="i * 60 + 'ms'"
+      style="background: rgba(20,16,60,0.7); border: 1px solid rgba(99,102,241,0.2); box-shadow: 0 4px 16px rgba(0,0,0,0.4);"
+    >
+      <!-- Left color accent based on status -->
+      <div class="flex items-stretch">
+        <div
+          class="w-1 shrink-0"
+          [style.background]="getStatusDot(order.status)"
+          aria-hidden="true"
+        ></div>
+
+        <div class="flex-1 px-5 py-5">
+          <!-- Top row: order ID + badge -->
+          <div class="flex items-start justify-between gap-4 mb-3">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-widest mb-0.5" style="color: #7c6fb0;">
+                Order ID
+              </p>
+              <p class="font-mono text-sm font-bold" style="color: #e0d9ff;">
+                {{ order.orderId.slice(0, 8) }}&hellip;
+              </p>
+            </div>
+
+            <!-- Status badge -->
+            <span
+              class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
+              [style]="getStatusBadgeStyle(order.status)"
+            >
+              <span
+                class="w-1.5 h-1.5 rounded-full inline-block"
+                [style.background]="getStatusDot(order.status)"
+                aria-hidden="true"
+              ></span>
+              {{ getStatusLabel(order.status) }}
+            </span>
+          </div>
+
+          <!-- Item list -->
+          <div *ngIf="order.items && order.items.length > 0" class="mb-3 space-y-1">
             <div
-              class="w-1 shrink-0"
-              [style.background]="getStatusDot(order.status)"
-              aria-hidden="true"
-            ></div>
-
-            <div class="flex-1 px-5 py-5">
-              <!-- Top row: order ID + badge -->
-              <div class="flex items-start justify-between gap-4 mb-3">
-                <div>
-                  <p class="text-xs font-bold uppercase tracking-widest mb-0.5" style="color: #7c6fb0;">
-                    Order ID
-                  </p>
-                  <p class="font-mono text-sm font-bold" style="color: #e0d9ff;">
-                    {{ order.orderId.slice(0, 8) }}&hellip;
-                  </p>
-                </div>
-
-                <!-- Status badge -->
-                <span
-                  class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
-                  [style]="getStatusBadgeStyle(order.status)"
-                >
-                  <span
-                    class="w-1.5 h-1.5 rounded-full inline-block"
-                    [style.background]="getStatusDot(order.status)"
-                    aria-hidden="true"
-                  ></span>
-                  {{ getStatusLabel(order.status) }}
-                </span>
-              </div>
-
-              <!-- Item list -->
-              @if (order.items && order.items.length > 0) {
-                <div class="mb-3 space-y-1">
-                  @for (item of order.items; track item.productId) {
-                    <div class="flex justify-between text-xs" style="color: #a78bfa;">
-                      <span>{{ item.productId }} &times; {{ item.quantity }}</span>
-                      <span>${{ (item.price * item.quantity).toFixed(2) }}</span>
-                    </div>
-                  }
-                </div>
-              }
-
-              <!-- Bottom row: date + total -->
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-1.5 text-sm" style="color: #7c6fb0;">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M16 2v4M8 2v4M3 10h18" />
-                  </svg>
-                  {{ formatDate(order.createdAt) }}
-                </div>
-                <span class="text-xl font-black cc-gradient-text">
-                  ${{ order.totalAmount.toFixed(2) }}
-                </span>
-              </div>
-
-              <!-- Tracking info (if shipped) -->
-              @if ((order.status === 'SHIPPED' || order.status === 'SHIPMENT_CREATED') && order.trackingId) {
-                <div
-                  class="mt-3 pt-3 border-t flex items-center gap-2"
-                  style="border-color: rgba(99,102,241,0.2);"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color: #34d399;" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
-                  </svg>
-                  <p class="text-xs font-semibold" style="color: #34d399;">
-                    Tracking: <span class="font-mono">{{ order.trackingId }}</span>
-                  </p>
-                </div>
-              }
+              *ngFor="let item of order.items; trackBy: trackByProductId"
+              class="flex justify-between text-xs"
+              style="color: #a78bfa;"
+            >
+              <span>{{ item.productId }} &times; {{ item.quantity }}</span>
+              <span>${{ (item.price * item.quantity).toFixed(2) }}</span>
             </div>
           </div>
-        </article>
-      }
-    </div>
+
+          <!-- Bottom row: date + total -->
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1.5 text-sm" style="color: #7c6fb0;">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+              {{ formatDate(order.createdAt) }}
+            </div>
+            <span class="text-xl font-black cc-gradient-text">
+              ${{ order.totalAmount.toFixed(2) }}
+            </span>
+          </div>
+
+          <!-- Tracking info (if shipped) -->
+          <div
+            *ngIf="(order.status === 'SHIPPED' || order.status === 'SHIPMENT_CREATED') && order.trackingId"
+            class="mt-3 pt-3 border-t flex items-center gap-2"
+            style="border-color: rgba(99,102,241,0.2);"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color: #34d399;" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
+            </svg>
+            <p class="text-xs font-semibold" style="color: #34d399;">
+              Tracking: <span class="font-mono">{{ order.trackingId }}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </article>
 
     <div class="mt-10 text-center">
       <a
@@ -205,6 +194,6 @@
         Place a new order
       </a>
     </div>
-  }
+  </div>
 
 </div>

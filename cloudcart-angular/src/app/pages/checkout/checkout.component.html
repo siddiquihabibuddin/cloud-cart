@@ -1,13 +1,11 @@
 <div class="max-w-2xl mx-auto cc-fade-up">
 
   <!-- ── Checkout form ─────────────────────────────────────────── -->
-  @if (!orderId()) {
+  <ng-container *ngIf="!orderId">
     <div class="flex items-center justify-between mb-8">
       <div>
         <h1 class="text-3xl font-black" style="color: #f0ebff;">Checkout</h1>
-        @if (cartItems().length > 0) {
-          <p class="text-sm mt-0.5" style="color: #7c6fb0;">Review your order before placing it</p>
-        }
+        <p *ngIf="cartItems.length > 0" class="text-sm mt-0.5" style="color: #7c6fb0;">Review your order before placing it</p>
       </div>
       <a
         routerLink="/cart"
@@ -22,218 +20,209 @@
     </div>
 
     <!-- Empty cart -->
-    @if (cartItems().length === 0) {
+    <div
+      *ngIf="cartItems.length === 0"
+      class="flex flex-col items-center justify-center py-24 rounded-3xl border"
+      style="border-color: rgba(124,58,237,0.35); background: rgba(30,27,75,0.4);"
+    >
       <div
-        class="flex flex-col items-center justify-center py-24 rounded-3xl border"
-        style="border-color: rgba(124,58,237,0.35); background: rgba(30,27,75,0.4);"
+        class="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
+        style="background: var(--cc-grad-brand);"
+        aria-hidden="true"
+      >
+        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      </div>
+      <p class="text-lg font-black mb-2" style="color: #f0ebff;">Your cart is empty</p>
+      <a
+        routerLink="/"
+        class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white mt-2 transition-all hover:scale-105"
+        style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
+      >Browse products</a>
+    </div>
+
+    <div *ngIf="cartItems.length > 0" class="space-y-4">
+      <!-- Order summary card -->
+      <div
+        class="rounded-2xl overflow-hidden"
+        style="background: rgba(20,16,60,0.7); border: 1px solid rgba(99,102,241,0.2); box-shadow: var(--cc-shadow-sm);"
       >
         <div
-          class="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
-          style="background: var(--cc-grad-brand);"
-          aria-hidden="true"
+          class="px-6 py-4 border-b"
+          style="background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.25);"
         >
-          <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-          </svg>
+          <h2 class="text-xs font-bold uppercase tracking-widest" style="color: #a78bfa;">
+            Order Summary
+          </h2>
         </div>
-        <p class="text-lg font-black mb-2" style="color: #f0ebff;">Your cart is empty</p>
-        <a
-          routerLink="/"
-          class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white mt-2 transition-all hover:scale-105"
-          style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
-        >Browse products</a>
-      </div>
-    } @else {
-      <div class="space-y-4">
-        <!-- Order summary card -->
-        <div
-          class="rounded-2xl overflow-hidden"
-          style="background: rgba(20,16,60,0.7); border: 1px solid rgba(99,102,241,0.2); box-shadow: var(--cc-shadow-sm);"
-        >
+        <div class="px-6 py-4 divide-y" style="--tw-divide-opacity: 0.15;">
           <div
-            class="px-6 py-4 border-b"
-            style="background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.25);"
+            *ngFor="let item of cartItems; trackBy: trackByProductId"
+            class="flex justify-between items-center py-3"
           >
-            <h2 class="text-xs font-bold uppercase tracking-widest" style="color: #a78bfa;">
-              Order Summary
-            </h2>
-          </div>
-          <div class="px-6 py-4 divide-y" style="--tw-divide-opacity: 0.15;">
-            @for (item of cartItems(); track item.productId) {
-              <div class="flex justify-between items-center py-3">
-                <div class="min-w-0">
-                  <p class="text-sm font-semibold truncate" style="color: #e0d9ff;">
-                    {{ item.title || item.productId }}
-                  </p>
-                  <p class="text-xs mt-0.5" style="color: #7c6fb0;">
-                    Qty: {{ item.quantity }} &times; ${{ item.price.toFixed(2) }}
-                  </p>
-                </div>
-                <span class="font-bold text-sm ml-4" style="color: #c4b5fd;">
-                  ${{ (item.price * item.quantity).toFixed(2) }}
-                </span>
-              </div>
-            }
-          </div>
-        </div>
-
-        <!-- Total bar -->
-        <div
-          class="flex justify-between items-center px-6 py-4 rounded-2xl"
-          style="background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.3);"
-        >
-          <span class="font-bold" style="color: #e0d9ff;">Total ({{ totalQty() }} item{{ totalQty() !== 1 ? 's' : '' }})</span>
-          <span class="text-2xl font-black cc-gradient-text">${{ total().toFixed(2) }}</span>
-        </div>
-
-        <!-- Error -->
-        @if (error()) {
-          <div
-            class="flex items-start gap-3 px-5 py-4 rounded-2xl border text-sm"
-            style="background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.35); color: #fca5a5;"
-            role="alert"
-          >
-            <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01" />
-            </svg>
-            <p>{{ error() }}</p>
-          </div>
-        }
-
-        <!-- Place order button -->
-        <button
-          (click)="placeOrder()"
-          [disabled]="placing()"
-          class="w-full flex items-center justify-center gap-3 py-4 rounded-2xl text-base font-black text-white transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed hover:scale-[1.02] hover:-translate-y-0.5 active:scale-[0.98]"
-          style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
-        >
-          @if (placing()) {
-            <span
-              class="w-5 h-5 border-2 border-t-transparent rounded-full cc-spin"
-              style="border-color: rgba(255,255,255,0.8);"
-              aria-hidden="true"
-            ></span>
-            Placing Order&hellip;
-          } @else {
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Place Order &mdash; ${{ total().toFixed(2) }}
-          }
-        </button>
-
-        <p class="text-center text-xs" style="color: #7c6fb0;">
-          By placing your order you agree to our demo terms. All transactions are simulated.
-        </p>
-      </div>
-    }
-  }
-
-  <!-- ── Order status screen ────────────────────────────────── -->
-  @if (orderId()) {
-    <div class="max-w-md mx-auto py-10" role="status" aria-live="polite">
-      <div
-        class="rounded-3xl overflow-hidden"
-        [style.border]="'1px solid ' + statusBorderColor()"
-        style="box-shadow: 0 8px 32px rgba(0,0,0,0.6);"
-      >
-        <!-- Colored header -->
-        <div
-          class="flex flex-col items-center justify-center gap-4 py-10 px-8"
-          [style.background]="statusGradient()"
-        >
-          <!-- Status icon -->
-          <div
-            class="w-20 h-20 rounded-full flex items-center justify-center"
-            style="background: rgba(255,255,255,0.18);"
-          >
-            @switch (orderStatus()) {
-              @case ('PAID') {
-                <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              }
-              @case ('SHIPMENT_CREATED') {
-                <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
-                </svg>
-              }
-              @case ('SHIPPED') {
-                <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-                </svg>
-              }
-              @case ('FAILED') {
-                <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              }
-              @default {
-                <!-- PENDING spinner -->
-                <span
-                  class="w-10 h-10 border-4 border-t-transparent rounded-full cc-spin inline-block"
-                  style="border-color: rgba(255,255,255,0.85);"
-                  aria-label="Processing"
-                ></span>
-              }
-            }
-          </div>
-          <h2 class="text-2xl font-black text-white text-center">{{ statusLabel() }}</h2>
-        </div>
-
-        <!-- Details panel -->
-        <div [style.background]="statusBgColor()" class="px-8 py-6 text-center space-y-4">
-          <!-- Order ID badge -->
-          <div
-            class="inline-flex flex-col items-center gap-1 px-5 py-3 rounded-2xl border"
-            [style.borderColor]="statusBorderColor()"
-          >
-            <p class="text-xs font-bold uppercase tracking-widest" [style.color]="statusTextColor()">
-              Order ID
-            </p>
-            <p class="font-mono text-sm font-semibold" style="color: #e0d9ff;">
-              {{ orderId() }}
-            </p>
-            <span
-              class="mt-1 px-2.5 py-0.5 rounded-full text-xs font-bold text-white"
-              [style.background]="statusGradient()"
-            >
-              {{ orderStatus() ?? 'PENDING' }}
+            <div class="min-w-0">
+              <p class="text-sm font-semibold truncate" style="color: #e0d9ff;">
+                {{ item.title || item.productId }}
+              </p>
+              <p class="text-xs mt-0.5" style="color: #7c6fb0;">
+                Qty: {{ item.quantity }} &times; ${{ item.price.toFixed(2) }}
+              </p>
+            </div>
+            <span class="font-bold text-sm ml-4" style="color: #c4b5fd;">
+              ${{ (item.price * item.quantity).toFixed(2) }}
             </span>
           </div>
+        </div>
+      </div>
 
-          <p class="text-sm" [style.color]="statusTextColor()">{{ statusDetail() }}</p>
+      <!-- Total bar -->
+      <div
+        class="flex justify-between items-center px-6 py-4 rounded-2xl"
+        style="background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.3);"
+      >
+        <span class="font-bold" style="color: #e0d9ff;">Total ({{ totalQty }} item{{ totalQty !== 1 ? 's' : '' }})</span>
+        <span class="text-2xl font-black cc-gradient-text">${{ total.toFixed(2) }}</span>
+      </div>
 
-          <!-- Tracking info when shipped -->
-          @if ((orderStatus() === 'SHIPPED' || orderStatus() === 'SHIPMENT_CREATED') && orderData()?.trackingId) {
-            <div
-              class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm"
-              style="background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.3); color: #34d399;"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
-              </svg>
-              Tracking: <span class="font-mono font-semibold">{{ orderData()?.trackingId }}</span>
-            </div>
-          }
+      <!-- Error -->
+      <div
+        *ngIf="error"
+        class="flex items-start gap-3 px-5 py-4 rounded-2xl border text-sm"
+        style="background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.35); color: #fca5a5;"
+        role="alert"
+      >
+        <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01" />
+        </svg>
+        <p>{{ error }}</p>
+      </div>
 
-          <!-- CTA buttons -->
-          <div class="pt-2 space-y-2">
-            <a
-              routerLink="/"
-              class="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02] hover:-translate-y-0.5 active:scale-[0.98]"
-              style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
-            >Continue Shopping</a>
-            <a
-              routerLink="/orders"
-              class="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] hover:-translate-y-0.5"
-              style="background: rgba(124,58,237,0.15); color: #a78bfa; border: 1.5px solid rgba(124,58,237,0.35);"
-            >View My Orders</a>
-          </div>
+      <!-- Place order button -->
+      <button
+        (click)="placeOrder()"
+        [disabled]="placing"
+        class="w-full flex items-center justify-center gap-3 py-4 rounded-2xl text-base font-black text-white transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed hover:scale-[1.02] hover:-translate-y-0.5 active:scale-[0.98]"
+        style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
+      >
+        <ng-container *ngIf="placing">
+          <span
+            class="w-5 h-5 border-2 border-t-transparent rounded-full cc-spin"
+            style="border-color: rgba(255,255,255,0.8);"
+            aria-hidden="true"
+          ></span>
+          Placing Order&hellip;
+        </ng-container>
+        <ng-container *ngIf="!placing">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Place Order &mdash; ${{ total.toFixed(2) }}
+        </ng-container>
+      </button>
+
+      <p class="text-center text-xs" style="color: #7c6fb0;">
+        By placing your order you agree to our demo terms. All transactions are simulated.
+      </p>
+    </div>
+  </ng-container>
+
+  <!-- ── Order status screen ────────────────────────────────── -->
+  <div *ngIf="orderId" class="max-w-md mx-auto py-10" role="status" aria-live="polite">
+    <div
+      class="rounded-3xl overflow-hidden"
+      [style.border]="'1px solid ' + statusBorderColor"
+      style="box-shadow: 0 8px 32px rgba(0,0,0,0.6);"
+    >
+      <!-- Colored header -->
+      <div
+        class="flex flex-col items-center justify-center gap-4 py-10 px-8"
+        [style.background]="statusGradient"
+      >
+        <!-- Status icon -->
+        <div
+          class="w-20 h-20 rounded-full flex items-center justify-center"
+          style="background: rgba(255,255,255,0.18);"
+          [ngSwitch]="orderStatus"
+        >
+          <!-- PAID -->
+          <svg *ngSwitchCase="'PAID'" class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          <!-- SHIPMENT_CREATED -->
+          <svg *ngSwitchCase="'SHIPMENT_CREATED'" class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
+          </svg>
+          <!-- SHIPPED -->
+          <svg *ngSwitchCase="'SHIPPED'" class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+          </svg>
+          <!-- FAILED -->
+          <svg *ngSwitchCase="'FAILED'" class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          <!-- PENDING (default) — spinner -->
+          <span
+            *ngSwitchDefault
+            class="w-10 h-10 border-4 border-t-transparent rounded-full cc-spin inline-block"
+            style="border-color: rgba(255,255,255,0.85);"
+            aria-label="Processing"
+          ></span>
+        </div>
+        <h2 class="text-2xl font-black text-white text-center">{{ statusLabel }}</h2>
+      </div>
+
+      <!-- Details panel -->
+      <div [style.background]="statusBgColor" class="px-8 py-6 text-center space-y-4">
+        <!-- Order ID badge -->
+        <div
+          class="inline-flex flex-col items-center gap-1 px-5 py-3 rounded-2xl border"
+          [style.borderColor]="statusBorderColor"
+        >
+          <p class="text-xs font-bold uppercase tracking-widest" [style.color]="statusTextColor">
+            Order ID
+          </p>
+          <p class="font-mono text-sm font-semibold" style="color: #e0d9ff;">
+            {{ orderId }}
+          </p>
+          <span
+            class="mt-1 px-2.5 py-0.5 rounded-full text-xs font-bold text-white"
+            [style.background]="statusGradient"
+          >
+            {{ orderStatus ?? 'PENDING' }}
+          </span>
+        </div>
+
+        <p class="text-sm" [style.color]="statusTextColor">{{ statusDetail }}</p>
+
+        <!-- Tracking info when shipped -->
+        <div
+          *ngIf="(orderStatus === 'SHIPPED' || orderStatus === 'SHIPMENT_CREATED') && orderData?.trackingId"
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm"
+          style="background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.3); color: #34d399;"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
+          </svg>
+          Tracking: <span class="font-mono font-semibold">{{ orderData?.trackingId }}</span>
+        </div>
+
+        <!-- CTA buttons -->
+        <div class="pt-2 space-y-2">
+          <a
+            routerLink="/"
+            class="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02] hover:-translate-y-0.5 active:scale-[0.98]"
+            style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
+          >Continue Shopping</a>
+          <a
+            routerLink="/orders"
+            class="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] hover:-translate-y-0.5"
+            style="background: rgba(124,58,237,0.15); color: #a78bfa; border: 1.5px solid rgba(124,58,237,0.35);"
+          >View My Orders</a>
         </div>
       </div>
     </div>
-  }
+  </div>
 
 </div>

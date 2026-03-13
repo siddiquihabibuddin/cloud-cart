@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject, Subscription } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
@@ -9,21 +10,21 @@ import { ProductCardComponent } from '../../shared/components/product-card/produ
 @Component({
   selector: 'app-products',
   standalone: true,
-  imports: [FormsModule, ProductCardComponent],
+  imports: [CommonModule, FormsModule, ProductCardComponent],
   templateUrl: './products.component.html'
 })
 export class ProductsComponent implements OnInit, OnDestroy {
   private productService = inject(ProductService);
 
-  products = signal<Product[]>([]);
-  lastKey = signal<string | null>(null);
-  loading = signal<boolean>(false);
-  loadingMore = signal<boolean>(false);
-  searchQuery = signal<string>('');
+  products: Product[] = [];
+  lastKey: string | null = null;
+  loading = false;
+  loadingMore = false;
+  searchQuery = '';
   searchInput = '';
 
-  searching = signal<boolean>(false);
-  error = signal<string | null>(null);
+  searching = false;
+  error: string | null = null;
 
   private searchSubject = new Subject<string>();
   private sub!: Subscription;
@@ -37,13 +38,13 @@ export class ProductsComponent implements OnInit, OnDestroy {
       debounceTime(300),
       distinctUntilChanged()
     ).subscribe(q => {
-      this.searchQuery.set(q);
+      this.searchQuery = q;
       if (q.trim()) {
         this.runSearch(q);
       } else {
-        this.searching.set(false);
-        this.products.set([]);
-        this.lastKey.set(null);
+        this.searching = false;
+        this.products = [];
+        this.lastKey = null;
         this.loadProducts();
       }
     });
@@ -55,60 +56,60 @@ export class ProductsComponent implements OnInit, OnDestroy {
 
   onSearchInput(value: string): void {
     this.searchInput = value;
-    this.searchQuery.set(value);
+    this.searchQuery = value;
     this.searchSubject.next(value);
   }
 
   loadProducts(): void {
-    this.loading.set(true);
-    this.error.set(null);
+    this.loading = true;
+    this.error = null;
     this.productService.listProducts(12).subscribe({
       next: (res) => {
-        this.products.set(res.products ?? []);
-        this.lastKey.set(res.nextKey ?? null);
-        this.loading.set(false);
+        this.products = res.products ?? [];
+        this.lastKey = res.nextKey ?? null;
+        this.loading = false;
       },
       error: () => {
-        this.error.set('Failed to load products. Is LocalStack running?');
-        this.loading.set(false);
+        this.error = 'Failed to load products. Is LocalStack running?';
+        this.loading = false;
       }
     });
   }
 
   loadMore(): void {
-    if (!this.lastKey() || this.loadingMore()) return;
-    this.loadingMore.set(true);
-    this.productService.listProducts(12, this.lastKey()).subscribe({
+    if (!this.lastKey || this.loadingMore) return;
+    this.loadingMore = true;
+    this.productService.listProducts(12, this.lastKey).subscribe({
       next: (res) => {
-        this.products.update(p => [...p, ...(res.products ?? [])]);
-        this.lastKey.set(res.nextKey ?? null);
-        this.loadingMore.set(false);
+        this.products = [...this.products, ...(res.products ?? [])];
+        this.lastKey = res.nextKey ?? null;
+        this.loadingMore = false;
       },
-      error: () => this.loadingMore.set(false)
+      error: () => { this.loadingMore = false; }
     });
   }
 
   private runSearch(q: string): void {
-    this.searching.set(true);
+    this.searching = true;
     this.productService.search(q).subscribe({
       next: (res) => {
-        this.products.set(res.results ?? []);
-        this.lastKey.set(null);
-        this.searching.set(false);
+        this.products = res.results ?? [];
+        this.lastKey = null;
+        this.searching = false;
       },
       error: () => {
-        this.products.set([]);
-        this.searching.set(false);
+        this.products = [];
+        this.searching = false;
       }
     });
   }
 
   clearSearch(): void {
     this.searchInput = '';
-    this.searchQuery.set('');
+    this.searchQuery = '';
     this.searchSubject.next('');
-    this.products.set([]);
-    this.lastKey.set(null);
+    this.products = [];
+    this.lastKey = null;
     this.loadProducts();
   }
 
@@ -126,4 +127,11 @@ export class ProductsComponent implements OnInit, OnDestroy {
     }
   }
 
+  trackByProductId(index: number, product: Product): string {
+    return product.productId;
+  }
+
+  trackByIndex(index: number, item: any): number {
+    return index;
+  }
 }

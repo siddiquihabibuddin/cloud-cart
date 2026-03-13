@@ -36,21 +36,20 @@
     <span
       class="absolute top-2.5 right-2.5 px-2.5 py-0.5 rounded-full text-xs font-bold"
       [style]="stockBadgeStyle"
-      [attr.aria-label]="stock() === 0 ? 'Out of stock' : stock() + ' in stock'"
+      [attr.aria-label]="stock === 0 ? 'Out of stock' : stock + ' in stock'"
     >
-      {{ stock() === 0 ? 'Out of stock' : stock() + ' left' }}
+      {{ stock === 0 ? 'Out of stock' : stock + ' left' }}
     </span>
 
     <!-- Category pill -->
-    @if (product.category) {
-      <span
-        class="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-xs font-bold text-white"
-        [style.background]="accentColor + 'cc'"
-        style="backdrop-filter: blur(4px);"
-      >
-        {{ product.category }}
-      </span>
-    }
+    <span
+      *ngIf="product.category"
+      class="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-xs font-bold text-white"
+      [style.background]="accentColor + 'cc'"
+      style="backdrop-filter: blur(4px);"
+    >
+      {{ product.category }}
+    </span>
   </div>
 
   <!-- Card body -->
@@ -67,50 +66,45 @@
       <p class="text-2xl font-black" [style.color]="accentColor">
         ${{ product.price.toFixed(2) }}
       </p>
-      @if (stock() > 0 && stock() <= 5) {
-        <p class="text-xs font-semibold" style="color: #fb923c;">
-          Only {{ stock() }} left!
-        </p>
-      }
+      <p *ngIf="stock > 0 && stock <= 5" class="text-xs font-semibold" style="color: #fb923c;">
+        Only {{ stock }} left!
+      </p>
     </div>
 
     <!-- Error message -->
-    @if (addError()) {
-      <p class="text-xs font-medium mb-2" style="color: #f87171;">{{ addError() }}</p>
-    }
+    <p *ngIf="addError" class="text-xs font-medium mb-2" style="color: #f87171;">{{ addError }}</p>
 
     <!-- Add to cart button -->
     <button
       (click)="onAddToCart()"
-      [disabled]="stock() === 0 || loading() || !userService.userId()"
+      [disabled]="stock === 0 || loading || !userId"
       class="w-full py-2.5 rounded-xl text-sm font-bold text-white transition-all duration-150 relative overflow-hidden"
       [style]="addButtonStyle"
-      [attr.aria-label]="added() ? 'Added to cart' : product.stock === 0 ? 'Out of stock' : 'Add ' + product.title + ' to cart'"
+      [attr.aria-label]="added ? 'Added to cart' : product.stock === 0 ? 'Out of stock' : 'Add ' + product.title + ' to cart'"
     >
-      @if (added()) {
-        <span class="flex items-center justify-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-          Added!
-        </span>
-      } @else if (loading()) {
-        <span class="flex items-center justify-center gap-1.5">
-          <span
-            class="w-3.5 h-3.5 border-2 border-t-transparent rounded-full cc-spin inline-block"
-            style="border-color: rgba(255,255,255,0.9);"
-            aria-hidden="true"
-          ></span>
-          Adding&hellip;
-        </span>
-      } @else {
-        <span class="flex items-center justify-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-          </svg>
-          {{ stock() === 0 ? 'Out of Stock' : !userService.userId() ? 'Set user ID first' : 'Add to Cart' }}
-        </span>
-      }
+      <!-- Added state -->
+      <span *ngIf="added" class="flex items-center justify-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+        Added!
+      </span>
+      <!-- Loading state -->
+      <span *ngIf="!added && loading" class="flex items-center justify-center gap-1.5">
+        <span
+          class="w-3.5 h-3.5 border-2 border-t-transparent rounded-full cc-spin inline-block"
+          style="border-color: rgba(255,255,255,0.9);"
+          aria-hidden="true"
+        ></span>
+        Adding&hellip;
+      </span>
+      <!-- Default state -->
+      <span *ngIf="!added && !loading" class="flex items-center justify-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+        {{ stock === 0 ? 'Out of Stock' : !userId ? 'Set user ID first' : 'Add to Cart' }}
+      </span>
     </button>
   </div>
 </article>

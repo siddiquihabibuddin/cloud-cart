@@ -36,12 +36,11 @@
       <div>
         <h3 class="text-xs font-bold uppercase tracking-widest mb-4" style="color: #6366f1;">Powered by</h3>
         <div class="flex flex-wrap gap-2">
-          @for (tech of techStack; track tech) {
-            <span
-              class="px-2.5 py-1 rounded-md text-xs font-medium"
-              style="background: rgba(99,102,241,0.15); color: #a78bfa; border: 1px solid rgba(99,102,241,0.25);"
-            >{{ tech }}</span>
-          }
+          <span
+            *ngFor="let tech of techStack; trackBy: trackByTech"
+            class="px-2.5 py-1 rounded-md text-xs font-medium"
+            style="background: rgba(99,102,241,0.15); color: #a78bfa; border: 1px solid rgba(99,102,241,0.25);"
+          >{{ tech }}</span>
         </div>
       </div>
 

@@ -1,35 +1,56 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
 import { CartService } from '../../../core/services/cart.service';
 import { UserService } from '../../../core/services/user.service';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, FormsModule],
+  imports: [CommonModule, RouterLink, RouterLinkActive, FormsModule],
   templateUrl: './header.component.html'
 })
-export class HeaderComponent {
+export class HeaderComponent implements OnInit, OnDestroy {
   cartService = inject(CartService);
   userService = inject(UserService);
 
-  editingUserId = signal<boolean>(false);
-  tempUserId = signal<string>('');
+  editingUserId = false;
+  tempUserId = '';
+  cartCount = 0;
+  userId = '';
+
+  private cartCountSub?: Subscription;
+  private userIdSub?: Subscription;
+
+  ngOnInit(): void {
+    this.cartCountSub = this.cartService.cartCount.subscribe(count => {
+      this.cartCount = count;
+    });
+    this.userIdSub = this.userService.userId.subscribe(id => {
+      this.userId = id;
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.cartCountSub?.unsubscribe();
+    this.userIdSub?.unsubscribe();
+  }
 
   startEdit(): void {
-    this.tempUserId.set(this.userService.userId());
-    this.editingUserId.set(true);
+    this.tempUserId = this.userService.getUserId();
+    this.editingUserId = true;
   }
 
   saveUserId(): void {
-    this.userService.setUserId(this.tempUserId());
-    this.editingUserId.set(false);
+    this.userService.setUserId(this.tempUserId);
+    this.editingUserId = false;
     this.cartService.loadCart();
   }
 
   cancelEdit(): void {
-    this.editingUserId.set(false);
+    this.editingUserId = false;
   }
 
   setNavHover(event: MouseEvent, hovering: boolean): void {

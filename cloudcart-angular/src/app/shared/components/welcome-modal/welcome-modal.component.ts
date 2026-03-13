@@ -1,4 +1,5 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '../../../core/services/user.service';
 import { CartService } from '../../../core/services/cart.service';
@@ -6,17 +7,17 @@ import { CartService } from '../../../core/services/cart.service';
 @Component({
   selector: 'app-welcome-modal',
   standalone: true,
-  imports: [FormsModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './welcome-modal.component.html'
 })
 export class WelcomeModalComponent {
   userService = inject(UserService);
   cartService = inject(CartService);
 
-  inputUserId = signal<string>('userid4');
+  inputUserId = 'userid4';
 
   submit(): void {
-    this.userService.setUserId(this.inputUserId());
+    this.userService.setUserId(this.inputUserId);
     this.cartService.loadCart();
   }
 

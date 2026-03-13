@@ -8,7 +8,7 @@
       "schematics": {
         "@schematics/angular:component": {
           "style": "css",
-          "standalone": true
+          "standalone": false
         }
       },
       "root": "",
@@ -16,11 +16,11 @@
       "prefix": "app",
       "architect": {
         "build": {
-          "builder": "@angular-devkit/build-angular:application",
+          "builder": "@angular-devkit/build-angular:browser",
           "options": {
             "outputPath": "dist/cloudcart-angular",
             "index": "src/index.html",
-            "browser": "src/main.ts",
+            "main": "src/main.ts",
             "polyfills": ["zone.js"],
             "tsConfig": "tsconfig.app.json",
             "assets": ["src/favicon.ico", "src/assets"],
@@ -46,8 +46,8 @@
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
-            "production": {"buildTarget": "cloudcart-angular:build:production"},
-            "development": {"buildTarget": "cloudcart-angular:build:development"}
+            "production": {"browserTarget": "cloudcart-angular:build:production"},
+            "development": {"browserTarget": "cloudcart-angular:build:development"}
           },
           "defaultConfiguration": "development",
           "options": {

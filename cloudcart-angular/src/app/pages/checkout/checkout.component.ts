@@ -1,15 +1,17 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { CartService } from '../../core/services/cart.service';
 import { OrderService } from '../../core/services/order.service';
 import { UserService } from '../../core/services/user.service';
+import { CartItem } from '../../core/models/cart.model';
 import { Order } from '../../core/models/order.model';
 
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [RouterLink],
+  imports: [CommonModule, RouterLink],
   templateUrl: './checkout.component.html'
 })
 export class CheckoutComponent implements OnInit, OnDestroy {
@@ -18,47 +20,49 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   private userService = inject(UserService);
   private router = inject(Router);
 
-  cartItems = this.cartService.cartItems;
-  total = computed(() =>
-    this.cartItems().reduce((sum, i) => sum + i.price * i.quantity, 0)
-  );
-  totalQty = computed(() =>
-    this.cartItems().reduce((sum, i) => sum + i.quantity, 0)
-  );
+  cartItems: CartItem[] = [];
 
-  statusGradient = computed(() => {
-    const s = this.orderStatus();
+  get total(): number {
+    return this.cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  }
+
+  get totalQty(): number {
+    return this.cartItems.reduce((sum, i) => sum + i.quantity, 0);
+  }
+
+  get statusGradient(): string {
+    const s = this.orderStatus;
     if (s === 'PAID' || s === 'SHIPMENT_CREATED' || s === 'SHIPPED')
       return 'linear-gradient(135deg, #059669, #10b981)';
     if (s === 'FAILED') return 'linear-gradient(135deg, #dc2626, #ef4444)';
     return 'linear-gradient(135deg, #d97706, #f59e0b)';
-  });
+  }
 
-  statusBgColor = computed(() => {
-    const s = this.orderStatus();
+  get statusBgColor(): string {
+    const s = this.orderStatus;
     if (s === 'PAID' || s === 'SHIPMENT_CREATED' || s === 'SHIPPED')
       return 'rgba(5,150,105,0.1)';
     if (s === 'FAILED') return 'rgba(220,38,38,0.1)';
     return 'rgba(217,119,6,0.1)';
-  });
+  }
 
-  statusBorderColor = computed(() => {
-    const s = this.orderStatus();
+  get statusBorderColor(): string {
+    const s = this.orderStatus;
     if (s === 'PAID' || s === 'SHIPMENT_CREATED' || s === 'SHIPPED')
       return 'rgba(52,211,153,0.35)';
     if (s === 'FAILED') return 'rgba(220,38,38,0.35)';
     return 'rgba(245,158,11,0.35)';
-  });
+  }
 
-  statusTextColor = computed(() => {
-    const s = this.orderStatus();
+  get statusTextColor(): string {
+    const s = this.orderStatus;
     if (s === 'PAID' || s === 'SHIPMENT_CREATED' || s === 'SHIPPED') return '#34d399';
     if (s === 'FAILED') return '#fca5a5';
     return '#fcd34d';
-  });
+  }
 
-  statusLabel = computed(() => {
-    switch (this.orderStatus()) {
+  get statusLabel(): string {
+    switch (this.orderStatus) {
       case 'SHIPMENT_CREATED': return 'Shipment Created';
       case 'PAID':             return 'Payment Successful';
       case 'PENDING':          return 'Processing Payment';
@@ -66,10 +70,10 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       case 'SHIPPED':          return 'Order Shipped';
       default:                 return 'Order Submitted';
     }
-  });
+  }
 
-  statusDetail = computed(() => {
-    switch (this.orderStatus()) {
+  get statusDetail(): string {
+    switch (this.orderStatus) {
       case 'SHIPMENT_CREATED':
         return 'Your order has been confirmed and a shipment is being prepared.';
       case 'PAID':
@@ -83,34 +87,40 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       default:
         return 'Order is being processed — check back shortly in My Orders.';
     }
-  });
+  }
 
-  placing = signal<boolean>(false);
-  orderId = signal<string | null>(null);
-  orderStatus = signal<string | null>(null);
-  orderData = signal<Order | null>(null);
-  error = signal<string | null>(null);
-  pollCount = signal<number>(0);
+  placing = false;
+  orderId: string | null = null;
+  orderStatus: string | null = null;
+  orderData: Order | null = null;
+  error: string | null = null;
+  pollCount = 0;
 
   private pollSub?: Subscription;
   private readonly MAX_POLLS = 20;
 
+  private cartItemsSub?: Subscription;
+
   ngOnInit(): void {
     this.cartService.loadCart();
+    this.cartItemsSub = this.cartService.cartItems.subscribe(items => {
+      this.cartItems = items;
+    });
   }
 
   ngOnDestroy(): void {
     this.stopPolling();
+    this.cartItemsSub?.unsubscribe();
   }
 
   placeOrder(): void {
-    if (this.placing() || this.cartItems().length === 0) return;
-    this.placing.set(true);
-    this.error.set(null);
+    if (this.placing || this.cartItems.length === 0) return;
+    this.placing = true;
+    this.error = null;
 
     const request = {
-      userId: this.userService.userId(),
-      items: this.cartItems().map(i => ({
+      userId: this.userService.getUserId(),
+      items: this.cartItems.map(i => ({
         productId: i.productId,
         quantity: i.quantity,
         price: i.price
@@ -119,14 +129,14 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
     this.orderService.placeOrder(request).subscribe({
       next: (res) => {
-        this.orderId.set(res.orderId);
-        this.orderStatus.set('PENDING');
-        this.placing.set(false);
+        this.orderId = res.orderId;
+        this.orderStatus = 'PENDING';
+        this.placing = false;
         this.startPolling(res.orderId);
       },
       error: (err) => {
-        this.error.set(err.error?.message ?? 'Failed to place order. Please try again.');
-        this.placing.set(false);
+        this.error = err.error?.message ?? 'Failed to place order. Please try again.';
+        this.placing = false;
       }
     });
   }
@@ -134,15 +144,15 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   private startPolling(orderId: string): void {
     let delay = 2000;
     const poll = () => {
-      if (this.pollCount() >= this.MAX_POLLS) {
+      if (this.pollCount >= this.MAX_POLLS) {
         this.stopPolling();
         return;
       }
-      this.orderService.getOrder(orderId, this.userService.userId()).subscribe({
+      this.orderService.getOrder(orderId, this.userService.getUserId()).subscribe({
         next: (order) => {
-          this.orderData.set(order);
-          this.orderStatus.set(order.status);
-          this.pollCount.update(c => c + 1);
+          this.orderData = order;
+          this.orderStatus = order.status;
+          this.pollCount += 1;
 
           if (['PAID', 'SHIPPED', 'SHIPMENT_CREATED', 'FAILED'].includes(order.status)) {
             this.stopPolling();
@@ -155,8 +165,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
           }
         },
         error: () => {
-          this.pollCount.update(c => c + 1);
-          if (this.pollCount() < this.MAX_POLLS) {
+          this.pollCount += 1;
+          if (this.pollCount < this.MAX_POLLS) {
             setTimeout(poll, delay);
           }
         }
@@ -170,9 +180,13 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   getStatusStep(): number {
-    const s = this.orderStatus();
+    const s = this.orderStatus;
     if (s === 'PAID') return 2;
     if (s === 'SHIPMENT_CREATED' || s === 'SHIPPED') return 3;
     return 1;
+  }
+
+  trackByProductId(index: number, item: CartItem): string {
+    return item.productId;
   }
 }

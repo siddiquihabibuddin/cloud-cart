@@ -1,4 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { Product } from '../../../core/models/product.model';
 import { CartService } from '../../../core/services/cart.service';
 import { UserService } from '../../../core/services/user.service';
@@ -17,6 +18,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 @Component({
   selector: 'app-product-card',
   standalone: true,
+  imports: [CommonModule],
   templateUrl: './product-card.component.html'
 })
 export class ProductCardComponent implements OnInit {
@@ -26,14 +28,14 @@ export class ProductCardComponent implements OnInit {
   cartService = inject(CartService);
   userService = inject(UserService);
 
-  added   = signal<boolean>(false);
-  loading = signal<boolean>(false);
-  addError = signal<string | null>(null);
+  added = false;
+  loading = false;
+  addError: string | null = null;
   hovered = false;
-  stock = signal<number>(0);
+  stock = 0;
 
   ngOnInit(): void {
-    this.stock.set(this.product.stock);
+    this.stock = this.product.stock;
   }
 
   get accentColor(): string {
@@ -41,7 +43,7 @@ export class ProductCardComponent implements OnInit {
   }
 
   get stockBadgeStyle(): string {
-    const s = this.stock();
+    const s = this.stock;
     if (s === 0) return 'background:#fef2f2;color:#dc2626;border:1px solid #fecaca;';
     if (s <= 3)  return 'background:#fff7ed;color:#ea580c;border:1px solid #fed7aa;';
     return 'background:rgba(5,150,105,0.15);color:#34d399;border:1px solid rgba(52,211,153,0.3);';
@@ -49,25 +51,29 @@ export class ProductCardComponent implements OnInit {
 
   get addButtonStyle(): string {
     const c = this.accentColor;
-    if (this.added())        return `background:linear-gradient(135deg,#059669,#10b981);box-shadow:0 4px 14px rgba(5,150,105,0.5);`;
-    if (this.stock() === 0)  return `background:linear-gradient(135deg,#374151,#4b5563);opacity:0.65;cursor:not-allowed;`;
-    if (!this.userService.userId()) return `background:linear-gradient(135deg,${c}88,${c}55);opacity:0.55;cursor:not-allowed;`;
-    if (this.loading())      return `background:linear-gradient(135deg,${c}cc,${c}99);box-shadow:0 4px 12px ${c}44;`;
+    if (this.added)       return `background:linear-gradient(135deg,#059669,#10b981);box-shadow:0 4px 14px rgba(5,150,105,0.5);`;
+    if (this.stock === 0) return `background:linear-gradient(135deg,#374151,#4b5563);opacity:0.65;cursor:not-allowed;`;
+    if (!this.userService.getUserId()) return `background:linear-gradient(135deg,${c}88,${c}55);opacity:0.55;cursor:not-allowed;`;
+    if (this.loading)     return `background:linear-gradient(135deg,${c}cc,${c}99);box-shadow:0 4px 12px ${c}44;`;
     return `background:linear-gradient(135deg,${c},${c}cc);box-shadow:0 4px 14px ${c}55;`;
   }
 
-  onAddToCart(): void {
-    if (this.stock() === 0 || this.loading() || !this.userService.userId()) return;
-    this.stock.update(s => Math.max(0, s - 1));
-    this.loading.set(true);
-    this.addError.set(null);
+  get userId(): string {
+    return this.userService.getUserId();
+  }
 
-    const existing = this.cartService.cartItems().find(i => i.productId === this.product.productId);
+  onAddToCart(): void {
+    if (this.stock === 0 || this.loading || !this.userService.getUserId()) return;
+    this.stock = Math.max(0, this.stock - 1);
+    this.loading = true;
+    this.addError = null;
+
+    const existing = this.cartService.getCartItems().find(i => i.productId === this.product.productId);
     if (existing) {
       this.cartService.updateQty(this.product.productId, existing.quantity + 1);
     } else {
       this.cartService.addItem({
-        userId: this.userService.userId(),
+        userId: this.userService.getUserId(),
         productId: this.product.productId,
         title: this.product.title,
         price: this.product.price,
@@ -75,9 +81,9 @@ export class ProductCardComponent implements OnInit {
       });
     }
 
-    this.added.set(true);
-    this.loading.set(false);
+    this.added = true;
+    this.loading = false;
     this.addToCart.emit(this.product);
-    setTimeout(() => this.added.set(false), 2000);
+    setTimeout(() => { this.added = false; }, 2000);
   }
 }

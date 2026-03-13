@@ -30,8 +30,7 @@
 
       <div class="space-y-3">
         <input
-          [ngModel]="inputUserId()"
-          (ngModelChange)="inputUserId.set($event)"
+          [(ngModel)]="inputUserId"
           (keyup.enter)="submit()"
           placeholder="Your user ID&hellip;"
           class="w-full px-4 py-3 text-sm rounded-xl transition-all duration-150"
@@ -44,9 +43,9 @@
 
         <button
           (click)="submit()"
-          [disabled]="!inputUserId().trim()"
+          [disabled]="!inputUserId.trim()"
           class="w-full py-3 rounded-xl text-sm font-bold text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
-          [style]="inputUserId().trim() ? 'background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);' : 'background: linear-gradient(135deg, #374151, #4b5563);'"
+          [style]="inputUserId.trim() ? 'background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);' : 'background: linear-gradient(135deg, #374151, #4b5563);'"
           (mouseenter)="onBtnHover($event, true)"
           (mouseleave)="onBtnHover($event, false)"
         >

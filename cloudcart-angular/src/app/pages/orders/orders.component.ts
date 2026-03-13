@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { OrderService } from '../../core/services/order.service';
 import { UserService } from '../../core/services/user.service';
@@ -7,17 +8,17 @@ import { Order } from '../../core/models/order.model';
 @Component({
   selector: 'app-orders',
   standalone: true,
-  imports: [RouterLink],
+  imports: [CommonModule, RouterLink],
   templateUrl: './orders.component.html'
 })
 export class OrdersComponent implements OnInit {
   private orderService = inject(OrderService);
   private userService = inject(UserService);
 
-  orders = signal<Order[]>([]);
-  loading = signal<boolean>(false);
-  refreshing = signal<boolean>(false);
-  error = signal<string | null>(null);
+  orders: Order[] = [];
+  loading = false;
+  refreshing = false;
+  error: string | null = null;
 
   ngOnInit(): void {
     this.loadOrders();
@@ -25,25 +26,25 @@ export class OrdersComponent implements OnInit {
 
   loadOrders(isRefresh = false): void {
     if (isRefresh) {
-      this.refreshing.set(true);
+      this.refreshing = true;
     } else {
-      this.loading.set(true);
+      this.loading = true;
     }
 
-    this.error.set(null);
-    this.orderService.listOrders(this.userService.userId()).subscribe({
+    this.error = null;
+    this.orderService.listOrders(this.userService.getUserId()).subscribe({
       next: (orders) => {
         const sorted = (orders ?? []).sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
-        this.orders.set(sorted);
-        this.loading.set(false);
-        this.refreshing.set(false);
+        this.orders = sorted;
+        this.loading = false;
+        this.refreshing = false;
       },
       error: () => {
-        this.error.set('Failed to load orders. Please try again.');
-        this.loading.set(false);
-        this.refreshing.set(false);
+        this.error = 'Failed to load orders. Please try again.';
+        this.loading = false;
+        this.refreshing = false;
       }
     });
   }
@@ -78,5 +79,17 @@ export class OrdersComponent implements OnInit {
     } catch {
       return dateStr;
     }
+  }
+
+  trackByOrderId(index: number, order: Order): string {
+    return order.orderId;
+  }
+
+  trackByProductId(index: number, item: any): string {
+    return item.productId;
+  }
+
+  trackByIndex(index: number, item: any): number {
+    return index;
   }
 }
