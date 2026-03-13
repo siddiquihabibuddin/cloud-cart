@@ -42,6 +42,12 @@ export class ProductCardComponent implements OnInit {
     return CATEGORY_COLORS[this.product.category ?? ''] ?? '#7c3aed';
   }
 
+  get imageUrl(): string {
+    if (this.product.imageUrl) return this.product.imageUrl;
+    const seed = encodeURIComponent(this.product.title.toLowerCase().replace(/\s+/g, '-'));
+    return `https://picsum.photos/seed/${seed}/400/300`;
+  }
+
   get stockBadgeStyle(): string {
     const s = this.stock;
     if (s === 0) return 'background:#fef2f2;color:#dc2626;border:1px solid #fecaca;';

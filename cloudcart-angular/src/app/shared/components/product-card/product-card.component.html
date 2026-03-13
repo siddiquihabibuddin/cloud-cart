@@ -19,8 +19,15 @@
     class="relative h-48 overflow-hidden flex items-center justify-center"
     [style.background]="'linear-gradient(135deg, ' + accentColor + '22 0%, ' + accentColor + '0d 100%)'"
   >
-    <!-- Placeholder icon -->
+    <!-- Product image -->
+    <img
+      [src]="imageUrl"
+      [alt]="product.title"
+      class="absolute inset-0 w-full h-full object-cover"
+    />
+    <!-- Placeholder icon (shown when no image) -->
     <svg
+      *ngIf="false"
       class="w-14 h-14 opacity-20"
       fill="none"
       stroke="currentColor"
