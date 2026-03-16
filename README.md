@@ -258,11 +258,54 @@ docker run -d \
 
 ### 2. Deploy all stacks
 
+Two equivalent deployment paths are available — pick one.
+
+#### Option A: Terraform (recommended)
+
+```bash
+# Build JARs and upload to S3 (required before first apply)
+mvn -f cloudcart-cart-service/pom.xml package -q -DskipTests
+mvn -f cloudcart-product-catalog-java/pom.xml package -q -DskipTests
+mvn -f cloudcart-order-service/pom.xml package -q -DskipTests
+mvn -f cloudcart-payment-service/pom.xml package -q -DskipTests
+mvn -f cloudcart-shipment-service/pom.xml package -q -DskipTests
+mvn -f cloudcart-search-service/pom.xml package -q -DskipTests
+
+awslocal s3 mb s3://sid-mysourcecode
+awslocal s3 cp cloudcart-cart-service/target/cart-service-1.0.0.jar         s3://sid-mysourcecode/
+awslocal s3 cp cloudcart-product-catalog-java/target/product-catalog-1.0.0.jar s3://sid-mysourcecode/
+awslocal s3 cp cloudcart-order-service/target/order-service-1.0.0.jar       s3://sid-mysourcecode/
+awslocal s3 cp cloudcart-payment-service/target/payment-service-1.0.0.jar   s3://sid-mysourcecode/
+awslocal s3 cp cloudcart-shipment-service/target/shipment-service-1.0.0.jar s3://sid-mysourcecode/
+awslocal s3 cp cloudcart-search-service/target/search-service-1.0.0.jar     s3://sid-mysourcecode/
+
+# Deploy all 7 modules (~191 resources)
+cd terraform
+terraform init
+terraform apply -auto-approve
+```
+
+After apply, Terraform prints the unified gateway URL:
+```
+unified_api_internal_url = "http://localhost:4566/restapis/<id>/dev/_user_request_"
+```
+Use this value in step 3.
+
+To update Lambda code after a code-only change:
+```bash
+# Rebuild the JAR, re-upload, then re-apply
+mvn -f cloudcart-cart-service/pom.xml package -q -DskipTests
+awslocal s3 cp cloudcart-cart-service/target/cart-service-1.0.0.jar s3://sid-mysourcecode/
+cd terraform && terraform apply -auto-approve
+```
+
+#### Option B: CloudFormation (original)
+
 ```bash
 bash deploy-localstack.sh
 ```
 
-Builds all six service JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
+Builds all six JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
 `cart` + `products` → `order` → `payment` → `shipment` → `search` → `gateway`
 
 The script also enables DynamoDB Streams on `ProductsTableDev` (required for real-time search indexing) and passes the stream ARN to the search stack as a parameter, working around a LocalStack limitation where `!GetAtt Table.StreamArn` returns `"unknown"` in CloudFormation.
@@ -312,7 +355,9 @@ bash seed-products.sh
 
 ## Force-refreshing Lambda code
 
-CloudFormation only redeploys when the template changes. After a code-only change, force a Lambda update:
+**Terraform**: rebuild the JAR, re-upload to S3, then `terraform apply` — the `source_code_hash` triggers a Lambda update automatically.
+
+**CloudFormation**: only redeploys when the template changes. After a code-only change, force a Lambda update directly:
 
 ```bash
 awslocal lambda update-function-code \
@@ -391,5 +436,5 @@ Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` vi
 
 - **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch, API Gateway (REST v1)
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios
-- **Infrastructure**: AWS CloudFormation, LocalStack Pro
+- **Infrastructure**: AWS CloudFormation, Terraform (HCL), LocalStack Pro
 - **Build**: Maven (Shade plugin for fat JARs)
