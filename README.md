@@ -2,6 +2,26 @@
 
 A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Functions, and Next.js — running locally via LocalStack.
 
+## Screenshots
+
+### Product Listing
+![Product Listing](screenshots/product-listing.png)
+
+### Product Search
+![Product Search](screenshots/search.png)
+
+### Cart
+![Cart](screenshots/cart.png)
+
+### Checkout
+![Checkout](screenshots/checkout.png)
+
+### Order Placed
+![Order Placed](screenshots/place-order.png)
+
+### My Orders
+![My Orders](screenshots/orders.png)
+
 ## Architecture
 
 ```
@@ -215,25 +235,52 @@ PENDING → FAILED
 | **CloudWatch metrics** | EMF-format metrics: `OrderPlaced`, `StockInsufficient`, `PaymentSucceeded`, `PaymentFailed`, `ShipmentInitiated`, `OrderShipped`, `CompensationCompleted`, `SagaUpdateFailed`, and error counters |
 | **Orders page** | `/orders` frontend page — lists all orders for a user with status badges, totals, dates, and tracking numbers once shipped |
 
-## Screenshots
+## Frontend Options
 
-### Product Listing
-![Product Listing](screenshots/product-listing.png)
+Two frontend implementations are available — both connect to the same backend via the unified API Gateway.
 
-### Product Search
-![Product Search](screenshots/search.png)
+| | Next.js (`cloudcart-frontend/`) | Angular (`cloudcart-angular/`) |
+|---|---|---|
+| Framework | Next.js 16 + React 19 | Angular 16 |
+| Styling | Tailwind CSS 4 | Tailwind CSS |
+| HTTP | Axios | Angular HttpClient |
+| Port | 3000 | 4200 |
+| Routing | Next.js file-based | Angular Router (lazy-loaded) |
+| Pages | Products, Cart, Checkout, Orders | Products, Cart, Checkout, Orders |
 
-### Cart
-![Cart](screenshots/cart.png)
+### Running the Next.js frontend
 
-### Checkout
-![Checkout](screenshots/checkout.png)
+```bash
+cd cloudcart-frontend
+npm install
+npm run dev        # http://localhost:3000
+```
 
-### Order Placed
-![Order Placed](screenshots/place-order.png)
+### Running the Angular frontend
 
-### My Orders
-![My Orders](screenshots/orders.png)
+```bash
+cd cloudcart-angular
+npm install
+```
+
+Update `proxy.conf.json` with your unified API Gateway ID (from `terraform output unified_api_internal_url` or the CloudFormation gateway stack output):
+
+```json
+{
+  "/api-products": { "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_", ... },
+  "/api-cart":     { "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_", ... },
+  "/api-orders":   { "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_", ... },
+  "/api-search":   { "target": "http://localhost:4566/restapis/<gateway-id>/dev/_user_request_", ... }
+}
+```
+
+Then start the dev server:
+
+```bash
+npm start          # http://localhost:4200
+```
+
+The Angular app uses the same four proxy paths (`/api-products`, `/api-cart`, `/api-orders`, `/api-search`) as the Next.js frontend — only the gateway ID in `proxy.conf.json` needs updating between deployments.
 
 ## Prerequisites
 
@@ -435,6 +482,7 @@ Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` vi
 ## Tech Stack
 
 - **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch, API Gateway (REST v1)
-- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios
+- **Frontend (Next.js)**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios
+- **Frontend (Angular)**: Angular 16, TypeScript, Tailwind CSS, Angular HttpClient
 - **Infrastructure**: AWS CloudFormation, Terraform (HCL), LocalStack Pro
 - **Build**: Maven (Shade plugin for fat JARs)
