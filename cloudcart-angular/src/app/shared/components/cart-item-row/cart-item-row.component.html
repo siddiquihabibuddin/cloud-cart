@@ -1,0 +1,85 @@
+<div
+  class="flex items-center gap-4 py-4 border-b last:border-0 transition-colors duration-150"
+  style="border-color: rgba(99,102,241,0.2);"
+>
+  <!-- Product icon -->
+  <div
+    class="hidden sm:flex w-12 h-12 rounded-xl items-center justify-center shrink-0"
+    style="background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(99,102,241,0.12)); border: 1px solid rgba(124,58,237,0.3);"
+    aria-hidden="true"
+  >
+    <svg
+      class="w-6 h-6"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      viewBox="0 0 24 24"
+      style="color: var(--cc-violet-light);"
+    >
+      <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
+    </svg>
+  </div>
+
+  <!-- Title & price per unit -->
+  <div class="flex-1 min-w-0">
+    <p class="font-semibold text-sm leading-snug truncate" style="color: #e0d9ff;">
+      {{ item.title || item.productId }}
+    </p>
+    <p class="text-xs mt-0.5" style="color: #7c6fb0;">
+      ${{ item.price.toFixed(2) }} each
+    </p>
+  </div>
+
+  <!-- Quantity stepper -->
+  <div
+    class="flex items-center rounded-xl overflow-hidden"
+    style="border: 1.5px solid rgba(124,58,237,0.4); background: rgba(30,27,75,0.6);"
+    aria-label="Quantity stepper"
+  >
+    <button
+      (click)="onDecrement()"
+      [disabled]="item.quantity <= 1"
+      class="w-8 h-8 flex items-center justify-center font-black text-base transition-all duration-100 disabled:opacity-30 hover:enabled:bg-violet-900/40"
+      style="color: #a78bfa;"
+      aria-label="Decrease quantity"
+    >
+      &minus;
+    </button>
+    <span
+      class="w-9 h-8 flex items-center justify-center text-sm font-black border-x"
+      style="border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.12); color: #c4b5fd;"
+      aria-live="polite"
+      [attr.aria-label]="'Quantity: ' + item.quantity"
+    >
+      {{ item.quantity }}
+    </span>
+    <button
+      (click)="onIncrement()"
+      class="w-8 h-8 flex items-center justify-center font-black text-base transition-all duration-100 hover:bg-violet-900/40"
+      style="color: #a78bfa;"
+      aria-label="Increase quantity"
+    >
+      +
+    </button>
+  </div>
+
+  <!-- Line total -->
+  <p class="font-black text-base w-20 text-right" style="color: #a78bfa;">
+    ${{ lineTotal.toFixed(2) }}
+  </p>
+
+  <!-- Remove button — vivid red default, red gradient on hover -->
+  <button
+    (click)="onRemove()"
+    class="p-2 rounded-lg transition-all duration-150"
+    style="color: #dc2626; background: rgba(220,38,38,0.12); border: 1px solid rgba(220,38,38,0.3);"
+    (mouseenter)="setRemoveHover($event, true)"
+    (mouseleave)="setRemoveHover($event, false)"
+    [attr.aria-label]="'Remove ' + item.title + ' from cart'"
+    title="Remove item"
+  >
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  </button>
+</div>

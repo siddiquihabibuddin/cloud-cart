@@ -1,0 +1,58 @@
+<footer class="mt-auto w-full" style="background: var(--cc-grad-dark);">
+  <!-- Top accent line -->
+  <div class="h-px w-full" style="background: var(--cc-grad-brand);" aria-hidden="true"></div>
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-10">
+
+      <!-- Brand column -->
+      <div class="sm:col-span-1">
+        <div class="flex items-center gap-2.5 mb-3">
+          <div
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-base font-black"
+            style="background: var(--cc-grad-brand);"
+            aria-hidden="true"
+          >C</div>
+          <span class="text-lg font-black text-white tracking-tight">CloudCart</span>
+        </div>
+        <p class="text-sm leading-relaxed" style="color: #a78bfa;">
+          A cloud-native e-commerce platform built on AWS Lambda, DynamoDB,
+          and SQS — fast, serverless, and scalable.
+        </p>
+      </div>
+
+      <!-- Quick links -->
+      <div>
+        <h3 class="text-xs font-bold uppercase tracking-widest mb-4" style="color: #6366f1;">Shop</h3>
+        <ul class="space-y-2.5">
+          <li><a routerLink="/" class="footer-link text-sm transition-colors duration-150" style="color: #c4b5fd;">All Products</a></li>
+          <li><a routerLink="/cart" class="footer-link text-sm transition-colors duration-150" style="color: #c4b5fd;">My Cart</a></li>
+          <li><a routerLink="/checkout" class="footer-link text-sm transition-colors duration-150" style="color: #c4b5fd;">Checkout</a></li>
+          <li><a routerLink="/orders" class="footer-link text-sm transition-colors duration-150" style="color: #c4b5fd;">My Orders</a></li>
+        </ul>
+      </div>
+
+      <!-- Tech stack badges -->
+      <div>
+        <h3 class="text-xs font-bold uppercase tracking-widest mb-4" style="color: #6366f1;">Powered by</h3>
+        <div class="flex flex-wrap gap-2">
+          <span
+            *ngFor="let tech of techStack; trackBy: trackByTech"
+            class="px-2.5 py-1 rounded-md text-xs font-medium"
+            style="background: rgba(99,102,241,0.15); color: #a78bfa; border: 1px solid rgba(99,102,241,0.25);"
+          >{{ tech }}</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom bar -->
+    <div
+      class="mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"
+      style="border-top: 1px solid rgba(99,102,241,0.25); color: #9b8ec4;"
+    >
+      <p>&copy; {{ currentYear }} CloudCart. Demo project.</p>
+      <p style="color: #7c6fb0;">Built with serverless architecture on LocalStack</p>
+    </div>
+  </div>
+</footer>

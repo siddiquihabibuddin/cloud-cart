@@ -1,0 +1,139 @@
+<div class="cc-fade-up">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-3xl font-black" style="color: #f0ebff;">Your Cart</h1>
+      <p *ngIf="cartItems.length > 0" class="text-sm mt-0.5" style="color: #7c6fb0;">
+        {{ totalQty }} item{{ totalQty !== 1 ? 's' : '' }} in your cart
+      </p>
+    </div>
+    <a
+      routerLink="/"
+      class="inline-flex items-center gap-1.5 text-sm font-semibold transition-colors duration-150"
+      style="color: var(--cc-violet-light);"
+    >
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+      </svg>
+      Continue shopping
+    </a>
+  </div>
+
+  <!-- Loading skeletons -->
+  <div *ngIf="loading" class="space-y-3">
+    <div *ngFor="let s of [1,2,3]" class="h-20 rounded-2xl cc-skeleton"></div>
+  </div>
+
+  <!-- Empty state -->
+  <div
+    *ngIf="!loading && cartItems.length === 0"
+    class="flex flex-col items-center justify-center py-24 rounded-3xl border"
+    style="border-color: rgba(124,58,237,0.35); background: rgba(30,27,75,0.4);"
+  >
+    <div
+      class="w-20 h-20 rounded-2xl flex items-center justify-center mb-6"
+      style="background: var(--cc-grad-brand);"
+      aria-hidden="true"
+    >
+      <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    </div>
+    <p class="text-xl font-black mb-2" style="color: #f0ebff;">Your cart is empty</p>
+    <p class="text-sm mb-6" style="color: #a78bfa;">Looks like you haven't added anything yet.</p>
+    <a
+      routerLink="/"
+      class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white transition-all duration-150 hover:scale-105 active:scale-95"
+      style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
+    >
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
+      </svg>
+      Browse products
+    </a>
+  </div>
+
+  <!-- Cart items + summary — two-column on desktop -->
+  <div *ngIf="!loading && cartItems.length > 0" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Items list -->
+    <div class="lg:col-span-2">
+      <div
+        class="rounded-2xl px-6 py-2"
+        style="background: rgba(20,16,60,0.7); border: 1px solid rgba(99,102,241,0.2); box-shadow: var(--cc-shadow-md);"
+      >
+        <app-cart-item-row
+          *ngFor="let item of cartItems; trackBy: trackByProductId"
+          [item]="item"
+          (quantityChange)="onQuantityChange($event)"
+          (remove)="onRemove($event)"
+        ></app-cart-item-row>
+      </div>
+    </div>
+
+    <!-- Order summary sidebar -->
+    <div class="lg:col-span-1">
+      <div
+        class="rounded-2xl overflow-hidden sticky top-24"
+        style="border: 1px solid rgba(124,58,237,0.4); box-shadow: var(--cc-shadow-lg);"
+      >
+        <!-- Header band -->
+        <div
+          class="px-6 py-4 border-b"
+          style="background: rgba(124,58,237,0.15); border-color: rgba(124,58,237,0.3);"
+        >
+          <h2 class="text-xs font-bold uppercase tracking-widest" style="color: #a78bfa;">
+            Order Summary
+          </h2>
+        </div>
+
+        <div class="px-6 py-5 space-y-3" style="background: rgba(20,16,60,0.85);">
+          <!-- Item breakdown -->
+          <div
+            *ngFor="let item of cartItems; trackBy: trackByProductId"
+            class="flex justify-between text-sm"
+          >
+            <span class="truncate max-w-40" style="color: #a78bfa;">
+              {{ item.title || item.productId }}
+              <span style="color: #7c6fb0;">&times;{{ item.quantity }}</span>
+            </span>
+            <span class="font-semibold" style="color: #e0d9ff;">
+              ${{ (item.price * item.quantity).toFixed(2) }}
+            </span>
+          </div>
+
+          <!-- Divider + total -->
+          <div class="pt-2 border-t" style="border-color: rgba(99,102,241,0.2);">
+            <div class="flex justify-between items-center">
+              <span class="font-bold text-sm" style="color: #e0d9ff;">
+                Total ({{ totalQty }} items)
+              </span>
+              <span class="text-2xl font-black cc-gradient-text">
+                ${{ total.toFixed(2) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Checkout CTA -->
+          <a
+            routerLink="/checkout"
+            class="mt-2 flex items-center justify-center gap-2 w-full py-3.5 rounded-xl text-sm font-bold text-white transition-all duration-150 hover:scale-[1.02] hover:-translate-y-0.5 active:scale-[0.98]"
+            style="background: var(--cc-grad-brand); box-shadow: var(--cc-shadow-btn);"
+          >
+            Proceed to Checkout
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </a>
+
+          <p class="text-center text-xs mt-1" style="color: #7c6fb0;">
+            Secure checkout powered by CloudCart
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>

@@ -1,0 +1,99 @@
+<header class="sticky top-0 z-40 w-full">
+  <div style="background: var(--cc-grad-header); border-bottom: 1px solid rgba(99,102,241,0.35); box-shadow: 0 4px 24px rgba(15,10,46,0.55);">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+
+        <!-- Logo -->
+        <a routerLink="/" class="flex items-center gap-2.5 group select-none" aria-label="CloudCart home">
+          <div
+            class="w-9 h-9 rounded-xl flex items-center justify-center text-white text-lg font-black shadow-md group-hover:scale-105 transition-transform duration-150"
+            style="background: var(--cc-grad-brand);"
+            aria-hidden="true"
+          >C</div>
+          <span class="text-xl font-black tracking-tight text-white">CloudCart</span>
+        </a>
+
+        <!-- Right side controls -->
+        <div class="flex items-center gap-2 sm:gap-3">
+
+          <!-- User chip (non-edit mode) -->
+          <div
+            *ngIf="!editingUserId"
+            class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
+            style="background: rgba(255,255,255,0.1); border: 1px solid rgba(196,181,253,0.35); color: #e0d9ff;"
+          >
+            <span class="w-2 h-2 rounded-full inline-block" style="background: var(--cc-violet-light);" aria-hidden="true"></span>
+            <span class="max-w-24 truncate">{{ userId }}</span>
+            <button
+              (click)="startEdit()"
+              class="ml-1 text-xs underline underline-offset-2 opacity-70 hover:opacity-100 transition-opacity"
+              style="color: #c4b5fd;"
+              aria-label="Change user ID"
+            >Change</button>
+          </div>
+
+          <!-- User chip (edit mode) -->
+          <div *ngIf="editingUserId" class="hidden sm:flex items-center gap-1.5">
+            <input
+              [(ngModel)]="tempUserId"
+              (keyup.enter)="saveUserId()"
+              (keyup.escape)="cancelEdit()"
+              class="w-28 px-2.5 py-1 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-violet-400"
+              style="background: rgba(30,27,75,0.9); border: 1px solid rgba(124,58,237,0.5);"
+              placeholder="User ID"
+              aria-label="Edit user ID"
+              autofocus
+            />
+            <button
+              (click)="saveUserId()"
+              class="text-xs font-bold px-2 py-1 rounded-md transition-colors"
+              style="color: #34d399; background: rgba(5,150,105,0.15); border: 1px solid rgba(5,150,105,0.3);"
+            >Save</button>
+            <button
+              (click)="cancelEdit()"
+              class="text-xs font-bold px-2 py-1 rounded-md transition-colors"
+              style="color: #f87171; background: rgba(220,38,38,0.12); border: 1px solid rgba(220,38,38,0.25);"
+            >Cancel</button>
+          </div>
+
+          <!-- My Orders link -->
+          <a
+            routerLink="/orders"
+            class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150"
+            style="color: #c4b5fd;"
+            (mouseenter)="setNavHover($event, true)"
+            (mouseleave)="setNavHover($event, false)"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            Orders
+          </a>
+
+          <!-- Cart button — orange gradient for high contrast on dark header -->
+          <a
+            routerLink="/cart"
+            class="relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all duration-150 hover:scale-105 active:scale-95"
+            style="background: var(--cc-grad-orange); box-shadow: var(--cc-shadow-btn-orange);"
+            [attr.aria-label]="cartCount > 0 ? 'Cart, ' + cartCount + ' items' : 'Cart'"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            <span class="hidden sm:inline">Cart</span>
+
+            <span
+              *ngIf="cartCount > 0"
+              class="cart-badge absolute -top-2 -right-2 min-w-5 h-5 px-1 flex items-center justify-center text-xs font-black rounded-full text-white cc-pulse-ring"
+              style="background: #7c3aed; box-shadow: 0 2px 8px rgba(124,58,237,0.7);"
+              aria-hidden="true"
+            >
+              {{ cartCount > 99 ? '99+' : cartCount }}
+            </span>
+          </a>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
