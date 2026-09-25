@@ -4,6 +4,7 @@ import "./globals.css";
 import { useState, useEffect, useCallback } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import ChatWidget from "@/components/ChatWidget";
 import { CartProvider } from "@/lib/CartContext";
 
 export default function RootLayout({
@@ -139,6 +140,7 @@ export default function RootLayout({
           </main>
 
           <Footer />
+          <ChatWidget userId={userId} />
         </CartProvider>
       </body>
     </html>

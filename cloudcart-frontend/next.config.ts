@@ -30,6 +30,10 @@ const nextConfig: NextConfig = {
         source: "/api-search/:path*",
         destination: `${UNIFIED_API}/search/:path*`,
       },
+      {
+        source: "/api-agent/:path*",
+        destination: `${UNIFIED_API}/agent/:path*`,
+      },
     ];
   },
 };

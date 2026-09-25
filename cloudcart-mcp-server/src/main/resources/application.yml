@@ -1,0 +1,14 @@
+server:
+  port: 8090
+
+spring:
+  ai:
+    mcp:
+      server:
+        name: cloudcart-mcp-server
+        version: 1.0.0
+        protocol: STREAMABLE
+
+cloudcart:
+  unified-api-url: ${UNIFIED_API_URL:http://localhost:4566/restapis/local/dev/_user_request_}
+  order-api-key: ${ORDER_API_KEY:cloudcart-dev-key-2024}

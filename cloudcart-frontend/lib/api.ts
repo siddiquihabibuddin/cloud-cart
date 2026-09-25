@@ -17,6 +17,25 @@ export const searchApi = axios.create({
   baseURL: process.env.NEXT_PUBLIC_SEARCH_API,
 });
 
+export const agentApi = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_AGENT_API,
+});
+
+export interface ChatApiMessage {
+  role: string;
+  content: string | null;
+  [key: string]: unknown;
+}
+
+export async function sendChatMessage(
+  userId: string,
+  message: string,
+  history: ChatApiMessage[]
+): Promise<{ reply: string; history: ChatApiMessage[] }> {
+  const { data } = await agentApi.post("/chat", { userId, message, history });
+  return data;
+}
+
 export async function placeOrder(
   userId: string,
   items: Array<{ productId: string; quantity: number; price: number }>

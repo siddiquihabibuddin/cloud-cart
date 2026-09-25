@@ -9,6 +9,7 @@ ORDER_DIR="cloudcart-order-service"
 PAYMENT_DIR="cloudcart-payment-service"
 SHIPMENT_DIR="cloudcart-shipment-service"
 SEARCH_DIR="cloudcart-search-service"
+AGENT_DIR="cloudcart-agent-service"
 S3_BUCKET="sid-mysourcecode"
 CART_JAR="cart-service-1.0.0.jar"
 PRODUCT_JAR="product-catalog-1.0.0.jar"
@@ -16,6 +17,7 @@ ORDER_JAR="order-service-1.0.0.jar"
 PAYMENT_JAR="payment-service-1.0.0.jar"
 SHIPMENT_JAR="shipment-service-1.0.0.jar"
 SEARCH_JAR="search-service-1.0.0.jar"
+AGENT_JAR="agent-service-1.0.0.jar"
 
 echo "==> Building cart service..."
 mvn -f "$CART_DIR/pom.xml" package -q -DskipTests
@@ -35,6 +37,11 @@ mvn -f "$SHIPMENT_DIR/pom.xml" package -q -DskipTests
 echo "==> Building search service..."
 mvn -f "$SEARCH_DIR/pom.xml" package -q -DskipTests
 
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  echo "==> Building agent service..."
+  mvn -f "$AGENT_DIR/pom.xml" package -q -DskipTests
+fi
+
 echo "==> Uploading JARs to S3..."
 awslocal s3 mb "s3://$S3_BUCKET" 2>/dev/null || true
 awslocal s3 cp "$CART_DIR/target/$CART_JAR"         "s3://$S3_BUCKET/$CART_JAR"
@@ -43,6 +50,9 @@ awslocal s3 cp "$ORDER_DIR/target/$ORDER_JAR"       "s3://$S3_BUCKET/$ORDER_JAR"
 awslocal s3 cp "$PAYMENT_DIR/target/$PAYMENT_JAR"   "s3://$S3_BUCKET/$PAYMENT_JAR"
 awslocal s3 cp "$SHIPMENT_DIR/target/$SHIPMENT_JAR" "s3://$S3_BUCKET/$SHIPMENT_JAR"
 awslocal s3 cp "$SEARCH_DIR/target/$SEARCH_JAR"       "s3://$S3_BUCKET/$SEARCH_JAR"
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  awslocal s3 cp "$AGENT_DIR/target/$AGENT_JAR"         "s3://$S3_BUCKET/$AGENT_JAR"
+fi
 
 cf_deploy() {
   # cloudformation deploy exits 255 when there are no changes; treat that as success
@@ -103,6 +113,17 @@ else
     --parameter-overrides "ProductsTableStreamArn=${STREAM_ARN}"
 fi
 
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  echo "==> Deploying agent service stack..."
+  cf_deploy \
+    --template-file "$AGENT_DIR/cloudcart-agent-template.yaml" \
+    --stack-name cloudcart-agent-dev \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameter-overrides "GroqApiKey=${GROQ_API_KEY}" "GroqModel=${GROQ_MODEL:-openai/gpt-oss-120b}"
+else
+  echo "  WARNING: GROQ_API_KEY not set; skipping agent service deploy (the /agent/chat route will not be wired up)"
+fi
+
 echo "==> Deploying unified gateway stack..."
 cf_deploy \
   --template-file "cloudcart-gateway-template.yaml" \
@@ -152,4 +173,10 @@ echo "==> Next step: grab the UnifiedApiInternalUrl from the gateway output abov
 echo "    NEXT_PUBLIC_UNIFIED_API_INTERNAL=http://localhost:4566/restapis/<gateway-api-id>/dev/_user_request_"
 echo "    in cloudcart-frontend/.env.local, then restart the frontend dev server."
 echo ""
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  echo "==> To start the shopping assistant's MCP server, in a separate terminal run:"
+  echo "    cd cloudcart-mcp-server && UNIFIED_API_URL=http://localhost:4566/restapis/<gateway-api-id>/dev/_user_request_ mvn spring-boot:run"
+  echo "    (use the same gateway API id printed in the UnifiedApiInternalUrl output above)"
+  echo ""
+fi
 bash "$(dirname "$0")/seed-products.sh"

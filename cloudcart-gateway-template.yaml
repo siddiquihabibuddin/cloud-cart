@@ -69,6 +69,21 @@ Resources:
       ParentId: !Ref OrdersResourceDev
       PathPart: "{orderId}"
 
+  ### /agent/chat ###
+  AgentResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !GetAtt UnifiedApiDev.RootResourceId
+      PathPart: agent
+
+  AgentChatResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref AgentResourceDev
+      PathPart: chat
+
   ### Lambda permissions — allow UnifiedApiDev to invoke every function ###
   ListProductsPermissionDev:
     Type: AWS::Lambda::Permission
@@ -163,6 +178,14 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !ImportValue cloudcart-order-ListOrdersFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  AgentChatPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-agent-AgentChatFunctionArn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
 
@@ -340,6 +363,21 @@ Resources:
           - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
           - Fn: !ImportValue cloudcart-order-GetOrderFunctionArn
 
+  ### Methods — Agent chat ###
+  PostAgentChatMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref AgentChatResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-agent-AgentChatFunctionArn
+
   ### /search and /search/reindex ###
   SearchResourceDev:
     Type: AWS::ApiGateway::Resource
@@ -418,9 +456,10 @@ Resources:
       - GetOrderMethodDev
       - GetSearchMethodDev
       - PostReindexMethodDev
+      - PostAgentChatMethodDev
     Properties:
       RestApiId: !Ref UnifiedApiDev
-      Description: "v2 - adds search endpoints"
+      Description: "v3 - adds agent chat endpoint"
 
   UnifiedApiStageDev:
     Type: AWS::ApiGateway::Stage
