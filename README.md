@@ -22,6 +22,9 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Func
 ### My Orders
 ![My Orders](screenshots/orders.png)
 
+### AI Shopping Assistant
+![AI Shopping Assistant](screenshots/chat-assistant.png)
+
 ## Architecture
 
 ```
@@ -102,6 +105,35 @@ order-service
     → SagaTableDev (COMPENSATION_COMPLETED / STOCK_RELEASED)
 ```
 
+### Shopping Assistant (Groq + MCP)
+
+A floating chat widget in the Next.js frontend lets users search products, manage their cart, and check orders in natural language. The chat Lambda never calls the product/cart/order services directly — it's an MCP client, and a separate MCP server owns the actual tool implementations.
+
+```
+┌───────────────────────┐
+│  Next.js ChatWidget    │
+└───────────┬────────────┘
+            │ POST /api-agent/chat
+            ▼
+┌────────────────────────┐
+│  Unified API Gateway    │
+└───────────┬─────────────┘
+            │ POST /agent/chat
+            ▼
+┌─────────────────────────────┐  MCP, Streamable HTTP   ┌──────────────────────────────┐
+│  cloudcart-agent-service      │ ───────────────────►  │  cloudcart-mcp-server          │
+│  Java 21 Lambda                │ ◄───────────────────  │  Spring Boot + Spring AI       │
+│  Groq tool-calling loop        │  tools/list,tools/call │  9 tools: search/cart/orders   │
+│  MCP client (raw Java SDK)     │                        └──────────────┬─────────────────┘
+└──────────────┬─────────────────┘                                       │ HTTP, back through the
+               │ chat completions                                        │ Unified API Gateway
+               ▼                                                          ▼
+        Groq API (free tier)                              product-catalog / cart / order services
+        openai/gpt-oss-120b
+```
+
+`cloudcart-agent-service` is a Lambda like its siblings — plain Java, no Spring, deployed via `cloudcart-agent-template.yaml`. `cloudcart-mcp-server` is deliberately **not** a Lambda: MCP is a stateful, session-based protocol, so it runs as a normal long-lived Spring Boot process (`mvn spring-boot:run`) alongside LocalStack, reachable from Lambda containers at `http://host.docker.internal:8090`. Tool definitions live in the MCP server (`@Tool`-annotated methods), not hardcoded in the Lambda — the agent fetches them at runtime via `tools/list`.
+
 ## Services
 
 | Service | Runtime | Trigger | Storage |
@@ -115,6 +147,8 @@ order-service
 | `ProcessOrderShippedFunctionDev` | Java 21 Lambda | SQS (`OrderShippedQueueDev`) | `OrdersTableDev`, SNS |
 | `ProcessCompensationFunctionDev` | Java 21 Lambda | SQS (`StockCompensationQueueDev`) | `SagaTableDev` |
 | `cloudcart-search-service` | Java 21 Lambda | DDB Stream + REST API | OpenSearch (`cloudcart-search-dev`) |
+| `cloudcart-agent-service` | Java 21 Lambda | REST API | — (stateless; calls Groq + `cloudcart-mcp-server`) |
+| `cloudcart-mcp-server` | Spring Boot (not a Lambda) | HTTP (Streamable HTTP MCP) | — (calls product/cart/order services via the gateway) |
 | `cloudcart-frontend` | Next.js | — | — |
 
 ## API Routes
@@ -146,6 +180,13 @@ Customers can view all their past orders at `/orders`. The page lists each order
 | `GET` | `/cart/{userId}` | View cart |
 | `PATCH` | `/cart/{userId}/{productId}` | Update quantity |
 | `DELETE` | `/cart/{userId}/{productId}` | Remove item |
+
+### Shopping Assistant
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/agent/chat` | Chat with the AI shopping assistant — body: `{"userId":"...","message":"...","history":[...]}`, returns `{"reply":"...","history":[...]}`. `history` is opaque and should be echoed back verbatim on the next call to keep conversation context. |
+
+Requires `cloudcart-mcp-server` to be running (see [Shopping Assistant (Groq + MCP)](#shopping-assistant-groq--mcp)) and a `GROQ_API_KEY` set when deploying — the route silently doesn't exist if `GROQ_API_KEY` wasn't set at deploy time.
 
 ### Orders
 All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
@@ -287,8 +328,9 @@ The Angular app uses the same four proxy paths (`/api-products`, `/api-cart`, `/
 - Docker
 - Java 21 + Maven
 - Node.js 20+
-- LocalStack Pro (auth token required)
+- LocalStack Pro (auth token required) — or LocalStack Community (`ACTIVATE_PRO=0`), which also works for every stack including search/OpenSearch
 - `awslocal` CLI (`pip install awscli-local`)
+- A free [Groq](https://console.groq.com) API key — only needed for the shopping assistant (`cloudcart-agent-service` + `cloudcart-mcp-server`); everything else works without it
 
 ## Getting Started
 
@@ -400,6 +442,24 @@ Products are seeded automatically at the end of `deploy-localstack.sh`. To re-ru
 bash seed-products.sh
 ```
 
+### 7. Start the shopping assistant (optional)
+
+Requires a free [Groq](https://console.groq.com) API key. Export it *before* running `deploy-localstack.sh` so the agent stack and its `/agent/chat` gateway route get deployed:
+
+```bash
+export GROQ_API_KEY=<your-free-key>
+bash deploy-localstack.sh
+```
+
+Then start the MCP server (a normal long-lived process, not a Lambda — see [Shopping Assistant (Groq + MCP)](#shopping-assistant-groq--mcp)) in a separate terminal, using the same gateway API id printed in the `UnifiedApiInternalUrl` output:
+
+```bash
+cd cloudcart-mcp-server
+UNIFIED_API_URL=http://localhost:4566/restapis/<gateway-api-id>/dev/_user_request_ mvn spring-boot:run
+```
+
+Add `NEXT_PUBLIC_AGENT_API=/api-agent` to `cloudcart-frontend/.env.local` (alongside the other `NEXT_PUBLIC_*_API` vars) and restart the frontend dev server — the chat bubble then appears in the bottom-right of every page.
+
 ## Force-refreshing Lambda code
 
 **Terraform**: rebuild the JAR, re-upload to S3, then `terraform apply` — the `source_code_hash` triggers a Lambda update automatically.
@@ -482,7 +542,8 @@ Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` vi
 ## Tech Stack
 
 - **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch, API Gateway (REST v1)
+- **Shopping Assistant**: [Groq](https://groq.com) (free-tier, OpenAI-compatible chat completions, `openai/gpt-oss-120b`), [Model Context Protocol](https://modelcontextprotocol.io) — `io.modelcontextprotocol.sdk` (raw Java client, in the plain-Java `cloudcart-agent-service` Lambda) + Spring AI's MCP server starter (in the standalone `cloudcart-mcp-server` process only — the only piece of CloudCart that uses Spring)
 - **Frontend (Next.js)**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios
 - **Frontend (Angular)**: Angular 16, TypeScript, Tailwind CSS, Angular HttpClient
 - **Infrastructure**: AWS CloudFormation, Terraform (HCL), LocalStack Pro
-- **Build**: Maven (Shade plugin for fat JARs)
+- **Build**: Maven (Shade plugin for fat JARs; Spring Boot plugin for `cloudcart-mcp-server`)

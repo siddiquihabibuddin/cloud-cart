@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '[DEV] Lambda function for the conversational shopping assistant (Groq + MCP)'
+
+Parameters:
+  GroqApiKey:
+    Type: String
+    NoEcho: true
+    Description: "Groq API key (free tier) used for LLM tool-calling"
+  GroqModel:
+    Type: String
+    Default: openai/gpt-oss-120b
+    Description: "Groq model id to use for chat completions (must support tool calling)"
+  McpServerUrl:
+    Type: String
+    Default: http://host.docker.internal:8090
+    Description: "Base URL of the locally-running cloudcart-mcp-server process"
+
+Resources:
+
+  ### IAM Role for Agent Lambda ###
+  AgentLambdaExecutionRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AgentLambdaExecutionRoleDev
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ### Lambda Function ###
+  AgentChatFunctionDev:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: AgentChatFunctionDev
+      Runtime: java21
+      Handler: com.cloudcart.agent.handler.AgentChatHandler::handleRequest
+      Role: !GetAtt AgentLambdaExecutionRoleDev.Arn
+      Code:
+        S3Bucket: sid-mysourcecode
+        S3Key: agent-service-1.0.0.jar
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          GROQ_API_KEY: !Ref GroqApiKey
+          GROQ_MODEL: !Ref GroqModel
+          MCP_SERVER_URL: !Ref McpServerUrl
+          ENV: dev
+
+Outputs:
+
+  AgentChatFunctionArn:
+    Value: !GetAtt AgentChatFunctionDev.Arn
+    Export:
+      Name: cloudcart-agent-AgentChatFunctionArn
