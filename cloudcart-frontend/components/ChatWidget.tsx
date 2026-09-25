@@ -46,7 +46,7 @@ export default function ChatWidget({ userId }: { userId: string | null }) {
     setHistory(optimisticHistory);
 
     try {
-      const res = await sendChatMessage(userId as string, text, history);
+      const res = await sendChatMessage(text, history);
       setHistory(res.history);
     } catch {
       setError("Sorry, the assistant is unavailable right now. Please try again.");

@@ -34,6 +34,10 @@ const nextConfig: NextConfig = {
         source: "/api-agent/:path*",
         destination: `${UNIFIED_API}/agent/:path*`,
       },
+      {
+        source: "/api-auth/:path*",
+        destination: `${UNIFIED_API}/auth/:path*`,
+      },
     ];
   },
 };

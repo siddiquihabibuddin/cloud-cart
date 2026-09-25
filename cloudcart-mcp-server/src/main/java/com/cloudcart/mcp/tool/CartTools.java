@@ -24,10 +24,12 @@ public class CartTools {
             @ToolParam(description = "The product id") String productId,
             @ToolParam(description = "The product title") String title,
             @ToolParam(description = "The product's unit price") double price,
-            @ToolParam(description = "Quantity to add, minimum 1") int quantity) {
+            @ToolParam(description = "Quantity to add, minimum 1") int quantity,
+            @ToolParam(description = "Internal - populated automatically, do not set", required = false) String authToken) {
         try {
             return restClient.post()
                     .uri("/cart")
+                    .headers(h -> applyAuth(h, authToken))
                     .body(Map.of(
                             "userId", userId,
                             "productId", productId,
@@ -42,10 +44,13 @@ public class CartTools {
     }
 
     @Tool(name = "view_cart", description = "View all items currently in a user's cart.")
-    public List<Map<String, Object>> viewCart(@ToolParam(description = "The user id") String userId) {
+    public List<Map<String, Object>> viewCart(
+            @ToolParam(description = "The user id") String userId,
+            @ToolParam(description = "Internal - populated automatically, do not set", required = false) String authToken) {
         try {
             return restClient.get()
                     .uri("/cart/{userId}", userId)
+                    .headers(h -> applyAuth(h, authToken))
                     .retrieve()
                     .body(new ParameterizedTypeReference<List<Map<String, Object>>>() {});
         } catch (Exception e) {
@@ -57,10 +62,12 @@ public class CartTools {
     public Map<String, Object> updateCartQuantity(
             @ToolParam(description = "The user id") String userId,
             @ToolParam(description = "The product id") String productId,
-            @ToolParam(description = "New quantity, minimum 1") int quantity) {
+            @ToolParam(description = "New quantity, minimum 1") int quantity,
+            @ToolParam(description = "Internal - populated automatically, do not set", required = false) String authToken) {
         try {
             return restClient.patch()
                     .uri("/cart/{userId}/{productId}", userId, productId)
+                    .headers(h -> applyAuth(h, authToken))
                     .body(Map.of("quantity", quantity))
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, Object>>() {});
@@ -72,14 +79,22 @@ public class CartTools {
     @Tool(name = "remove_from_cart", description = "Remove a single product from a user's cart.")
     public Map<String, Object> removeFromCart(
             @ToolParam(description = "The user id") String userId,
-            @ToolParam(description = "The product id") String productId) {
+            @ToolParam(description = "The product id") String productId,
+            @ToolParam(description = "Internal - populated automatically, do not set", required = false) String authToken) {
         try {
             return restClient.delete()
                     .uri("/cart/{userId}/{productId}", userId, productId)
+                    .headers(h -> applyAuth(h, authToken))
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
             return ToolErrors.from(e);
+        }
+    }
+
+    private void applyAuth(org.springframework.http.HttpHeaders headers, String authToken) {
+        if (authToken != null && !authToken.isBlank()) {
+            headers.set("Authorization", "Bearer " + authToken);
         }
     }
 }

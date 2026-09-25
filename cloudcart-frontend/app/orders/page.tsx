@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { listOrders, Order } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
 /* ── Status badge config ────────────────────────────────────── */
 const STATUS_CONFIG: Record<
@@ -116,16 +117,11 @@ function SkeletonCard() {
 }
 
 export default function OrdersPage() {
-  const [userId, setUserId] = useState<string | null | undefined>(undefined);
+  const session = useSession();
+  const userId = session === undefined ? undefined : session?.userId ?? null;
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("cc_user_id") || "userid4";
-    localStorage.setItem("cc_user_id", stored);
-    setUserId(stored);
-  }, []);
 
   const fetchOrders = useCallback(async (uid: string) => {
     setLoading(true);
@@ -175,14 +171,14 @@ export default function OrdersPage() {
           No session active
         </p>
         <p className="text-sm mb-6" style={{ color: "var(--cc-text-secondary)" }}>
-          Please set a user ID on the home page first.
+          Please log in first.
         </p>
         <Link
-          href="/"
+          href="/login"
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
           style={{ background: "var(--cc-grad-brand)", boxShadow: "var(--cc-shadow-md)" }}
         >
-          Go to products
+          Log in
         </Link>
       </div>
     );

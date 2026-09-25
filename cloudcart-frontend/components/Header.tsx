@@ -5,10 +5,11 @@ import { useCart } from "@/lib/CartContext";
 
 interface HeaderProps {
   userId: string | null;
-  onChangeUser: () => void;
+  email: string | null;
+  onLogout: () => void;
 }
 
-export default function Header({ userId, onChangeUser }: HeaderProps) {
+export default function Header({ userId, email, onLogout }: HeaderProps) {
   const { cartCount } = useCart();
 
   return (
@@ -63,14 +64,14 @@ export default function Header({ userId, onChangeUser }: HeaderProps) {
                     style={{ background: "var(--cc-violet-light)" }}
                     aria-hidden="true"
                   />
-                  <span>{userId}</span>
+                  <span>{email || userId}</span>
                   <button
-                    onClick={onChangeUser}
+                    onClick={onLogout}
                     className="ml-1 text-xs underline underline-offset-2 opacity-70 hover:opacity-100 transition-opacity"
                     style={{ color: "#c4b5fd" }}
-                    aria-label="Change user ID"
+                    aria-label="Log out"
                   >
-                    Change
+                    Logout
                   </button>
                 </div>
               )}

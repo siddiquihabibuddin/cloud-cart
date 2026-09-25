@@ -4,6 +4,8 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.cloudcart.order.model.Order;
 import com.cloudcart.order.repository.OrderRepository;
+import com.cloudcart.order.util.JwtVerificationException;
+import com.cloudcart.order.util.JwtVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -13,17 +15,28 @@ public class ListOrdersHandler implements RequestHandler<Map<String, Object>, Ma
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final OrderRepository repository = new OrderRepository();
+    private final JwtVerifier jwtVerifier = new JwtVerifier(System.getenv("JWT_SECRET"));
 
     @Override
     @SuppressWarnings("unchecked")
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
         try {
+            String authenticatedUserId;
+            try {
+                authenticatedUserId = jwtVerifier.verifyFromHeaders((Map<String, Object>) input.get("headers"));
+            } catch (JwtVerificationException e) {
+                return response(401, "{\"error\":\"Unauthorized\"}");
+            }
+
             Map<String, String> queryParams = (Map<String, String>) input.get("queryStringParameters");
             if (queryParams == null || queryParams.get("userId") == null) {
                 return response(400, "{\"error\":\"userId query parameter is required\"}");
             }
 
             String userId = queryParams.get("userId");
+            if (!authenticatedUserId.equals(userId)) {
+                return response(403, "{\"error\":\"Forbidden\"}");
+            }
             List<Order> orders = repository.listByUser(userId);
 
             return Map.of(
