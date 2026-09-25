@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getCart, clearCart, CartItem } from "@/lib/cart";
 import { useCart } from "@/lib/CartContext";
 import { placeOrder, getOrder } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
 const POLLING_TIMEOUT_MSG =
   "Order is being processed — check back shortly in My Orders.";
@@ -49,7 +50,8 @@ function OrderStatusIcon({ status }: { status: OrderStatus["status"] }) {
 
 export default function CheckoutPage() {
   const { refreshCartCount } = useCart();
-  const [userId, setUserId] = useState<string | null | undefined>(undefined);
+  const session = useSession();
+  const userId = session === undefined ? undefined : session?.userId ?? null;
   const [items, setItems] = useState<CartItem[]>([]);
   const [loadingCart, setLoadingCart] = useState(true);
   const [placing, setPlacing] = useState(false);
@@ -60,10 +62,6 @@ export default function CheckoutPage() {
   useEffect(() => {
     cancelledRef.current = false;
     return () => { cancelledRef.current = true; };
-  }, []);
-
-  useEffect(() => {
-    const _uid = localStorage.getItem("cc_user_id") || "userid4"; localStorage.setItem("cc_user_id", _uid); setUserId(_uid);
   }, []);
 
   const fetchCart = useCallback(async () => {
@@ -152,10 +150,10 @@ export default function CheckoutPage() {
           No session active
         </p>
         <p className="text-sm mb-6" style={{ color: "var(--cc-text-secondary)" }}>
-          Please set a user ID on the home page first.
+          Please log in first.
         </p>
         <Link
-          href="/"
+          href="/login"
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
           style={{ background: "var(--cc-grad-brand)", boxShadow: "var(--cc-shadow-md)" }}
         >

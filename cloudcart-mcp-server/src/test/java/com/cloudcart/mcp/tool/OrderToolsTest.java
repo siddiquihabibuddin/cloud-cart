@@ -23,16 +23,17 @@ class OrderToolsTest {
             new CloudCartProperties("http://gateway.test", "test-api-key");
 
     @Test
-    void placeOrderSendsApiKeyHeader() {
+    void placeOrderSendsApiKeyAndAuthorizationHeaders() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://gateway.test");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://gateway.test/orders"))
                 .andExpect(method(POST))
                 .andExpect(header("x-api-key", "test-api-key"))
+                .andExpect(header("Authorization", "Bearer test-token"))
                 .andRespond(withSuccess("{\"orderId\":\"o1\"}", MediaType.APPLICATION_JSON));
 
         OrderTools tools = new OrderTools(builder.build(), PROPERTIES);
-        Map<String, Object> result = tools.placeOrder("u1", List.of(new OrderItemInput("p1", 2, 19.99)));
+        Map<String, Object> result = tools.placeOrder("u1", List.of(new OrderItemInput("p1", 2, 19.99)), "test-token");
 
         assertThat(result).containsEntry("orderId", "o1");
         server.verify();
@@ -45,10 +46,11 @@ class OrderToolsTest {
         server.expect(requestTo("http://gateway.test/orders/o1?userId=u1"))
                 .andExpect(method(GET))
                 .andExpect(header("x-api-key", "test-api-key"))
+                .andExpect(header("Authorization", "Bearer test-token"))
                 .andRespond(withSuccess("{\"orderId\":\"o1\",\"status\":\"PENDING\"}", MediaType.APPLICATION_JSON));
 
         OrderTools tools = new OrderTools(builder.build(), PROPERTIES);
-        Map<String, Object> result = tools.getOrder("o1", "u1");
+        Map<String, Object> result = tools.getOrder("o1", "u1", "test-token");
 
         assertThat(result).containsEntry("status", "PENDING");
         server.verify();
@@ -61,10 +63,11 @@ class OrderToolsTest {
         server.expect(requestTo("http://gateway.test/orders?userId=u1"))
                 .andExpect(method(GET))
                 .andExpect(header("x-api-key", "test-api-key"))
+                .andExpect(header("Authorization", "Bearer test-token"))
                 .andRespond(withSuccess("[{\"orderId\":\"o1\"}]", MediaType.APPLICATION_JSON));
 
         OrderTools tools = new OrderTools(builder.build(), PROPERTIES);
-        List<Map<String, Object>> result = tools.listOrders("u1");
+        List<Map<String, Object>> result = tools.listOrders("u1", "test-token");
 
         assertThat(result).hasSize(1);
         server.verify();

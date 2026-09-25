@@ -4,6 +4,8 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.cloudcart.order.model.Order;
 import com.cloudcart.order.repository.OrderRepository;
+import com.cloudcart.order.util.JwtVerificationException;
+import com.cloudcart.order.util.JwtVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Map;
@@ -12,11 +14,19 @@ public class GetOrderHandler implements RequestHandler<Map<String, Object>, Map<
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final OrderRepository REPOSITORY = new OrderRepository();
+    private static final JwtVerifier JWT_VERIFIER = new JwtVerifier(System.getenv("JWT_SECRET"));
 
     @Override
     @SuppressWarnings("unchecked")
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
         try {
+            String authenticatedUserId;
+            try {
+                authenticatedUserId = JWT_VERIFIER.verifyFromHeaders((Map<String, Object>) input.get("headers"));
+            } catch (JwtVerificationException e) {
+                return response(401, "{\"error\":\"Unauthorized\"}");
+            }
+
             Map<String, String> pathParams = (Map<String, String>) input.get("pathParameters");
             if (pathParams == null || pathParams.get("orderId") == null) {
                 return response(400, "{\"error\":\"orderId path parameter is required\"}");
@@ -26,6 +36,9 @@ public class GetOrderHandler implements RequestHandler<Map<String, Object>, Map<
             String requestingUserId = queryParams != null ? queryParams.get("userId") : null;
             if (requestingUserId == null || requestingUserId.isBlank()) {
                 return response(400, "{\"error\":\"userId query parameter is required\"}");
+            }
+            if (!authenticatedUserId.equals(requestingUserId)) {
+                return response(403, "{\"error\":\"Forbidden\"}");
             }
 
             String orderId = pathParams.get("orderId");

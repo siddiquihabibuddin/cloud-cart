@@ -34,6 +34,11 @@
             <artifactId>mcp-json-jackson2</artifactId>
             <version>2.0.1</version>
         </dependency>
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>10.3</version>
+        </dependency>
 
         <dependency>
             <groupId>org.junit.jupiter</groupId>

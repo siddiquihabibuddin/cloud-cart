@@ -10,6 +10,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -45,9 +46,42 @@ public class McpToolBridge implements ToolBridge {
                     "function", Map.of(
                             "name", tool.name(),
                             "description", tool.description() == null ? "" : tool.description(),
-                            "parameters", tool.inputSchema())));
+                            "parameters", withNullableOptionalFields(tool.inputSchema()))));
         }
         return groqTools;
+    }
+
+    /**
+     * Groq's tool-calling occasionally emits an explicit `null` for an optional
+     * parameter it decided not to use, instead of omitting the key entirely. A plain
+     * "type": "number" schema (Spring AI's default for an optional field) rejects that
+     * as invalid, which fails the whole tool call. Widening every non-required
+     * property's type to also allow null keeps optional parameters truly optional.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> withNullableOptionalFields(Map<String, Object> schema) {
+        if (schema == null || !(schema.get("properties") instanceof Map)) {
+            return schema;
+        }
+        Map<String, Object> result = new LinkedHashMap<>(schema);
+        Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+        List<?> required = schema.get("required") instanceof List ? (List<?>) schema.get("required") : List.of();
+
+        Map<String, Object> newProperties = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : properties.entrySet()) {
+            String propName = entry.getKey();
+            if (required.contains(propName) || !(entry.getValue() instanceof Map)) {
+                newProperties.put(propName, entry.getValue());
+                continue;
+            }
+            Map<String, Object> propSchema = new LinkedHashMap<>((Map<String, Object>) entry.getValue());
+            if (propSchema.get("type") instanceof String type && !type.equals("null")) {
+                propSchema.put("type", List.of(type, "null"));
+            }
+            newProperties.put(propName, propSchema);
+        }
+        result.put("properties", newProperties);
+        return result;
     }
 
     @Override

@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: '[DEV] Order service - Lambda, DynamoDB, SQS, REST API Gateway'
 
+Parameters:
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: "Shared HS256 signing secret used to verify JWTs issued by cloudcart-auth-service"
+
 Resources:
 
   ### DynamoDB Table for Saga ###
@@ -252,6 +258,7 @@ Resources:
           PRODUCTS_API_URL: !ImportValue cloudcart-products-ProductApiInternalUrl
           IDEMPOTENCY_TABLE: !Ref IdempotencyTableDev
           SAGA_TABLE: !Ref SagaTableDev
+          JWT_SECRET: !Ref JwtSecret
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   GetOrderFunctionDev:
@@ -270,6 +277,7 @@ Resources:
         Variables:
           ORDERS_TABLE: !Ref OrdersTableDev
           ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
+          JWT_SECRET: !Ref JwtSecret
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   ListOrdersFunctionDev:
@@ -288,6 +296,7 @@ Resources:
         Variables:
           ORDERS_TABLE: !Ref OrdersTableDev
           ORDER_QUEUE_URL: !Ref OrderPlacedQueueDev
+          JWT_SECRET: !Ref JwtSecret
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   ProcessCompensationFunctionDev:

@@ -31,6 +31,27 @@ Resources:
       ParentId: !GetAtt UnifiedApiDev.RootResourceId
       PathPart: orders
 
+  AccountAuthResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !GetAtt UnifiedApiDev.RootResourceId
+      PathPart: auth
+
+  AccountAuthRegisterResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref AccountAuthResourceDev
+      PathPart: register
+
+  AccountAuthLoginResourceDev:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ParentId: !Ref AccountAuthResourceDev
+      PathPart: login
+
   ### /products/{id} and /products/{id}/stock ###
   ProductIdResourceDev:
     Type: AWS::ApiGateway::Resource
@@ -186,6 +207,22 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !ImportValue cloudcart-agent-AgentChatFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  RegisterPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-auth-RegisterFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
+
+  LoginPermissionDev:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !ImportValue cloudcart-auth-LoginFunctionArn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
 
@@ -378,6 +415,35 @@ Resources:
           - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
           - Fn: !ImportValue cloudcart-agent-AgentChatFunctionArn
 
+  ### Methods — Account auth ###
+  PostRegisterMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref AccountAuthRegisterResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-auth-RegisterFunctionArn
+
+  PostLoginMethodDev:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      ResourceId: !Ref AccountAuthLoginResourceDev
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
+          - Fn: !ImportValue cloudcart-auth-LoginFunctionArn
+
   ### /search and /search/reindex ###
   SearchResourceDev:
     Type: AWS::ApiGateway::Resource
@@ -457,9 +523,11 @@ Resources:
       - GetSearchMethodDev
       - PostReindexMethodDev
       - PostAgentChatMethodDev
+      - PostRegisterMethodDev
+      - PostLoginMethodDev
     Properties:
       RestApiId: !Ref UnifiedApiDev
-      Description: "v3 - adds agent chat endpoint"
+      Description: "v4 - adds account auth endpoints"
 
   UnifiedApiStageDev:
     Type: AWS::ApiGateway::Stage

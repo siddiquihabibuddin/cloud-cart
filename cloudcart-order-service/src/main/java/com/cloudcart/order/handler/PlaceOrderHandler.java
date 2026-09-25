@@ -8,6 +8,8 @@ import com.cloudcart.order.model.OrderPlacedEvent;
 import com.cloudcart.order.repository.OrderRepository;
 import com.cloudcart.order.repository.SagaRepository;
 import com.cloudcart.order.util.JsonLogger;
+import com.cloudcart.order.util.JwtVerificationException;
+import com.cloudcart.order.util.JwtVerifier;
 import com.cloudcart.order.util.MetricsEmitter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,6 +55,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
     private static final String IDEMPOTENCY_TABLE = System.getenv("IDEMPOTENCY_TABLE");
     private static final String SAGA_TABLE = System.getenv("SAGA_TABLE");
     private static final SagaRepository SAGA_REPO;
+    private static final JwtVerifier JWT_VERIFIER = new JwtVerifier(System.getenv("JWT_SECRET"));
 
     static {
         String endpointUrl = System.getenv("AWS_ENDPOINT_URL");
@@ -80,6 +83,13 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
         Map<String, Object> headers = (Map<String, Object>) input.get("headers");
         JsonLogger logger = JsonLogger.fromHeaders("order-service", headers);
 
+        String authenticatedUserId;
+        try {
+            authenticatedUserId = JWT_VERIFIER.verifyFromHeaders(headers);
+        } catch (JwtVerificationException e) {
+            return response(401, "{\"error\":\"Unauthorized\"}");
+        }
+
         // Declare idempotencyKey outside the try block so the catch clause can
         // reference it when marking the idempotency record FAILED.
         String idempotencyKey = null;
@@ -98,6 +108,9 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             // --- Input validation ---
             if (userId == null || userId.isBlank()) {
                 return response(400, "{\"error\":\"userId is required\"}");
+            }
+            if (!authenticatedUserId.equals(userId)) {
+                return response(403, "{\"error\":\"Forbidden\"}");
             }
             if (items == null || items.isEmpty()) {
                 return response(400, "{\"error\":\"items are required\"}");

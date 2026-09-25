@@ -14,6 +14,10 @@ Parameters:
     Type: String
     Default: http://host.docker.internal:8090
     Description: "Base URL of the locally-running cloudcart-mcp-server process"
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: "Shared HS256 signing secret used to verify JWTs issued by cloudcart-auth-service"
 
 Resources:
 
@@ -50,6 +54,7 @@ Resources:
           GROQ_API_KEY: !Ref GroqApiKey
           GROQ_MODEL: !Ref GroqModel
           MCP_SERVER_URL: !Ref McpServerUrl
+          JWT_SECRET: !Ref JwtSecret
           ENV: dev
 
 Outputs:

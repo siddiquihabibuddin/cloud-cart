@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listProducts, searchProducts, Product } from "@/lib/products";
 import ProductCard from "@/components/ProductCard";
+import { useSession } from "@/lib/session";
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -10,15 +11,12 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
+  const session = useSession();
+  const userId = session?.userId ?? null;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Product[] | null>(null);
   const [searching, setSearching] = useState(false);
   const searchCounterRef = useRef(0);
-
-  useEffect(() => {
-    const _uid = localStorage.getItem("cc_user_id") || "userid4"; localStorage.setItem("cc_user_id", _uid); setUserId(_uid);
-  }, []);
 
   useEffect(() => {
     setLoading(true);

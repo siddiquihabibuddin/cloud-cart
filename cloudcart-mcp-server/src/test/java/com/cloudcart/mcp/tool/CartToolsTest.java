@@ -14,6 +14,7 @@ import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.PATCH;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -21,17 +22,18 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class CartToolsTest {
 
     @Test
-    void addToCartSendsExpectedBody() {
+    void addToCartSendsExpectedBodyAndForwardsAuthToken() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://gateway.test");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://gateway.test/cart"))
                 .andExpect(method(POST))
+                .andExpect(header("Authorization", "Bearer test-token"))
                 .andExpect(content().json(
                         "{\"userId\":\"u1\",\"productId\":\"p1\",\"title\":\"Mouse\",\"price\":19.99,\"quantity\":2}"))
                 .andRespond(withSuccess("{\"message\":\"Item added to cart\"}", MediaType.APPLICATION_JSON));
 
         CartTools tools = new CartTools(builder.build());
-        Map<String, Object> result = tools.addToCart("u1", "p1", "Mouse", 19.99, 2);
+        Map<String, Object> result = tools.addToCart("u1", "p1", "Mouse", 19.99, 2, "test-token");
 
         assertThat(result).containsEntry("message", "Item added to cart");
         server.verify();
@@ -43,10 +45,11 @@ class CartToolsTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://gateway.test/cart/u1"))
                 .andExpect(method(GET))
+                .andExpect(header("Authorization", "Bearer test-token"))
                 .andRespond(withSuccess("[{\"productId\":\"p1\",\"quantity\":2}]", MediaType.APPLICATION_JSON));
 
         CartTools tools = new CartTools(builder.build());
-        List<Map<String, Object>> result = tools.viewCart("u1");
+        List<Map<String, Object>> result = tools.viewCart("u1", "test-token");
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0)).containsEntry("productId", "p1");
@@ -59,11 +62,12 @@ class CartToolsTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://gateway.test/cart/u1/p1"))
                 .andExpect(method(PATCH))
+                .andExpect(header("Authorization", "Bearer test-token"))
                 .andExpect(content().json("{\"quantity\":3}"))
                 .andRespond(withSuccess("{\"message\":\"Quantity updated\"}", MediaType.APPLICATION_JSON));
 
         CartTools tools = new CartTools(builder.build());
-        Map<String, Object> result = tools.updateCartQuantity("u1", "p1", 3);
+        Map<String, Object> result = tools.updateCartQuantity("u1", "p1", 3, "test-token");
 
         assertThat(result).containsEntry("message", "Quantity updated");
         server.verify();
@@ -75,12 +79,28 @@ class CartToolsTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://gateway.test/cart/u1/p1"))
                 .andExpect(method(DELETE))
+                .andExpect(header("Authorization", "Bearer test-token"))
                 .andRespond(withSuccess("{\"message\":\"Item removed from cart\"}", MediaType.APPLICATION_JSON));
 
         CartTools tools = new CartTools(builder.build());
-        Map<String, Object> result = tools.removeFromCart("u1", "p1");
+        Map<String, Object> result = tools.removeFromCart("u1", "p1", "test-token");
 
         assertThat(result).containsEntry("message", "Item removed from cart");
+        server.verify();
+    }
+
+    @Test
+    void viewCartOmitsAuthorizationHeaderWhenTokenIsMissing() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://gateway.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("http://gateway.test/cart/u1"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        CartTools tools = new CartTools(builder.build());
+        List<Map<String, Object>> result = tools.viewCart("u1", null);
+
+        assertThat(result).isEmpty();
         server.verify();
     }
 }

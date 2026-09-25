@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: '[DEV] Lambda functions with DynamoDB and REST API Gateway for cart management'
 
+Parameters:
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: "Shared HS256 signing secret used to verify JWTs issued by cloudcart-auth-service"
+
 Resources:
 
   ### DynamoDB Table for Cart ###
@@ -66,6 +72,7 @@ Resources:
       Environment:
         Variables:
           CART_TABLE: !Ref CartTableDev
+          JWT_SECRET: !Ref JwtSecret
           ENV: dev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
@@ -84,6 +91,7 @@ Resources:
       Environment:
         Variables:
           CART_TABLE: !Ref CartTableDev
+          JWT_SECRET: !Ref JwtSecret
           ENV: dev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
@@ -102,6 +110,7 @@ Resources:
       Environment:
         Variables:
           CART_TABLE: !Ref CartTableDev
+          JWT_SECRET: !Ref JwtSecret
           ENV: dev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
@@ -120,6 +129,7 @@ Resources:
       Environment:
         Variables:
           CART_TABLE: !Ref CartTableDev
+          JWT_SECRET: !Ref JwtSecret
           ENV: dev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
@@ -138,6 +148,7 @@ Resources:
       Environment:
         Variables:
           CART_TABLE: !Ref CartTableDev
+          JWT_SECRET: !Ref JwtSecret
           ENV: dev
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
