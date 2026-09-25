@@ -22,6 +22,9 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Func
 ### My Orders
 ![My Orders](screenshots/orders.png)
 
+### AI Shopping Assistant
+![AI Shopping Assistant](screenshots/chat-assistant.png)
+
 ## Architecture
 
 ```
