@@ -153,6 +153,11 @@ A floating chat widget in the Next.js frontend lets users search products, manag
         openai/gpt-oss-120b
 ```
 
+**Token budget.** Groq's free tier allows roughly 8K tokens per minute, and every tool-loop iteration resends the whole conversation plus the tool definitions, so the service keeps requests small:
+- Only `user`/`assistant` text is returned as `history`; tool calls and results exist only inside the current request. The system prompt tells the model to mention product, cart-item and order ids in its replies so later turns can still refer to them (otherwise it just searches again).
+- The history window is the last 12 messages, always starting on a user message, and client-supplied `system`/`tool` messages are dropped.
+- Any single tool result over 2,000 characters is truncated (`...[truncated]`), and `search_products` returns at most 5 products while still reporting the full match count in `total`.
+
 `cloudcart-agent-service` is a Lambda like its siblings — plain Java, no Spring, deployed via `cloudcart-agent-template.yaml`. `cloudcart-mcp-server` is deliberately **not** a Lambda: MCP is a stateful, session-based protocol, so it runs as a normal long-lived Spring Boot process (`mvn spring-boot:run`, started for you by `./start.sh` when `GROQ_API_KEY` is set) alongside the emulator, reachable from Lambda containers at `http://host.docker.internal:8090`. Tool definitions live in the MCP server (`@Tool`-annotated methods), not hardcoded in the Lambda — the agent fetches them at runtime via `tools/list`.
 
 ## Services
@@ -205,7 +210,7 @@ Customers can view all their past orders at `/orders`. The page lists each order
 ### Shopping Assistant
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/agent/chat` | Chat with the AI shopping assistant — body: `{"userId":"...","message":"...","history":[...]}`, returns `{"reply":"...","history":[...]}`. `history` is opaque and should be echoed back verbatim on the next call to keep conversation context. |
+| `POST` | `/agent/chat` | Chat with the AI shopping assistant — body: `{"userId":"...","message":"...","history":[...]}`, returns `{"reply":"...","history":[...]}`. `history` should be echoed back unchanged on the next call to keep conversation context. It holds only `user`/`assistant` text turns (tool calls and tool results are not kept between turns), capped at the last 12 messages; anything else the client sends back is discarded. |
 
 Requires `cloudcart-mcp-server` to be running (see [Shopping Assistant (Groq + MCP)](#shopping-assistant-groq--mcp)) and a `GROQ_API_KEY` exported when running `deploy-localstack.sh` — the route is only wired up (`IncludeAgentRoute=true` on the gateway stack) when the key was set at deploy time; otherwise the rest of the API still deploys and `/agent/chat` simply doesn't exist.
 
