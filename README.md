@@ -28,22 +28,30 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Func
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                         Next.js Frontend                         │
-│    Products + Search → Cart → Checkout → Order Status → Orders   │
-└──────────────────────────────┬───────────────────────────────────┘
-                               │ /api-products, /api-cart,
-                               │ /api-orders,  /api-search
-                   ┌───────────▼───────────┐
-                   │   Unified API Gateway  │
-                   │   (UnifiedApiDev)      │
-                   └──┬──────┬──────┬──────┘
-                      │      │      │      │
-    ┌─────────────────▼─┐  ┌─▼──┐  ┌▼──────────────┐  ┌──────────────────┐
-    │  product-catalog  │  │cart│  │  order-service  │  │  search-service  │
-    │  Lambda + DDB     │  │ λ  │  │  Lambda + DDB   │  │  Lambda +        │
-    │  (DDB Stream ──────────────────────────────────────► OpenSearch)     │
-    └───────────────────┘  └────┘  └────────────────┘  └──────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 Next.js Frontend  :3000                                 │
+│       Login · Products + Search · Cart · Checkout · Orders · AI shopping assistant      │
+└────────────────────────────────────────────┬────────────────────────────────────────────┘
+                                             │ /api-auth /api-products /api-cart /api-orders /api-search /api-agent
+                                             │ (every call carries an X-Correlation-Id)
+                                 ┌───────────────────────┐
+                                 │  Unified API Gateway  │
+                                 └───────────┬───────────┘
+       ┌──────────────┬──────────────┬───────┴──────┬──────────────┬──────────────┐
+       ▼              ▼              ▼              ▼              ▼              ▼
+┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
+│    auth    │ │  product   │ │    cart    │ │   order    │ │   search   │ │   agent    │
+│ Lambda+DDB │ │ Lambda+DDB │ │ Lambda+DDB │ │ Lambda+DDB │ │   Lambda   │ │   Lambda   │
+└────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘
+
+  order ──HTTP──► product                     reserve / release stock (all-or-nothing)
+  order ──SQS──► payment ──SQS──► shipment ──SNS──► notification        (see Order Saga)
+  payment ──SQS (on FAILED)──► compensation ──HTTP──► product            stock released
+  product ──DynamoDB Stream──► search ──► OpenSearch                     real-time indexing
+  agent ──► Groq (LLM);   agent ──MCP──► MCP server :8090 ──► Unified API Gateway
+
+  Every Lambda runs cloudcart-common (JsonLogger · Redactor · LoggedHandler): JSON on stdout
+      └──► Alloy ──► Loki ──► Grafana :3001                                (see Logging)
 ```
 
 ### Local Runtime
@@ -611,6 +619,25 @@ Every line has `timestamp`, `level`, `service`, `correlationId`, `message`; requ
 | `tool.call` | agent and MCP server | tool, redacted arguments + result, durationMs, failed |
 | `agent.turn` | agent | iterations, toolCalls, **totalTokens** for the whole chat turn |
 
+### How one request is traced
+
+```
+ Browser ──X-Correlation-Id──► API Gateway ──► Lambda                          http.in / http.out
+                                                 │
+                                                 ├─► another service over HTTP  client.request / client.response
+                                                 │     (product API, OpenSearch)  id forwarded as a header
+                                                 │
+                                                 ├─► SQS / SNS                  sqs.out / sns.out
+                                                 │     └─► payment ─► shipment    sqs.in ... (same id, from a message attribute)
+                                                 │
+                                                 └─► agent Lambda (chat)        agent.turn = iterations, tool calls, total tokens
+                                                       ├─► Groq                 llm.request / llm.response (tokens, latency)
+                                                       └─► MCP server           mcp.request / mcp.response, id forwarded as a header
+                                                             └─► tool.call ─► gateway ─► cart / product / order Lambdas (same id)
+
+ all stdout ──► Alloy ──► Loki ──► Grafana :3001 ──► filter on one id to see the whole picture
+```
+
 ### Finding a request
 
 Open **Grafana → CloudCart Logs** (http://localhost:3001, no login). Paste a correlation id into the box to see every hop of that request, oldest first. The same query in Explore:
@@ -622,6 +649,16 @@ Open **Grafana → CloudCart Logs** (http://localhost:3001, no login). Paste a c
 Other useful queries: `{level="ERROR"}`, `{event="llm.response"} | json | totalTokens > 1000`, `{service="agent-service", event="tool.call"} | json | failed="true"`. The dashboard also charts tokens per Groq call, Groq latency, errors and log volume by service. The browser shows a request's id in the chat widget's error message ("ref: ..."), and `NEXT_PUBLIC_LOG_HTTP=true` makes the browser console print one line per API call with its id.
 
 Without Grafana: Lambda output is in `docker logs floci` (lines prefixed `[lambda:<Function>]`), the MCP server in `.dev/mcp.log`, the frontend in `.dev/frontend.log`; `grep` for the correlation id.
+
+### Troubleshooting with the logs
+
+| Symptom | What to look for | Usual cause |
+|---|---|---|
+| Order returns **409 Insufficient stock** | order `http.out` status 409; the `client.response` from `product-api` just before it | A cart item has no stock. *Running Shoes* is seeded with `stock: 0` on purpose. Remove it, or top it up with `PATCH /products/{id}/stock {"release":N}`. The order service releases anything it had already reserved. |
+| Order accepted (201) but ends **FAILED** | `payment-service` line `Payment processed` with `status=FAILED`, then `compensation-service` `Stock compensation completed` | The payment service is a simulator: `Math.random() < 0.8 ? PAID : FAILED` (about 1 in 5 orders fail by design). Stock is released automatically. Place the order again. |
+| Chat answers with an error ("ref: ...") | Paste the ref into the dashboard: the `mcp.response` / `llm.response` lines with `level=ERROR` show the cause (`429` rate limit, tool error, ...) | Groq's free tier allows about 8K tokens per minute; one two-tool turn used about 3.4K. See `retryAfter` on the `llm.response` line. |
+| Chat fails with `MCP session with server terminated` | `mcp.response` ERROR on `tools/list` | The MCP server was restarted on its own while the agent Lambda still held a session with the old instance. Restart everything (`./stop.sh && ./start.sh`), or redeploy/recycle the agent Lambda. |
+| Slow first request | `durationMs` on the first `http.out` after a quiet period | Lambda cold start, about 7-8 s per function on Floci; warm calls take tens of milliseconds. |
 
 ### Switches
 
