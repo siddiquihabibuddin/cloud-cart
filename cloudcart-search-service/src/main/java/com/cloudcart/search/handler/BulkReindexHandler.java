@@ -1,7 +1,7 @@
 package com.cloudcart.search.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.search.model.ProductDocument;
 import com.cloudcart.search.repository.OpenSearchRepository;
 import com.cloudcart.search.repository.ProductScanRepository;
@@ -9,13 +9,13 @@ import com.cloudcart.search.repository.ProductScanRepository;
 import java.util.List;
 import java.util.Map;
 
-public class BulkReindexHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class BulkReindexHandler extends LoggedHandler {
 
     private static final OpenSearchRepository SEARCH_REPO = new OpenSearchRepository();
     private static final ProductScanRepository SCAN_REPO = new ProductScanRepository();
 
     @Override
-    public Map<String, Object> handleRequest(Map<String, Object> event, Context context) {
+    protected Map<String, Object> process(Map<String, Object> event, Context context) {
         try {
             SEARCH_REPO.ensureIndex();
             List<ProductDocument> products = SCAN_REPO.scanAll();

@@ -1,7 +1,7 @@
 package com.cloudcart.auth.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.auth.model.User;
 import com.cloudcart.auth.repository.DynamoUserRepository;
 import com.cloudcart.auth.repository.UserRepository;
@@ -13,7 +13,7 @@ import org.mindrot.jbcrypt.BCrypt;
 
 import java.util.Map;
 
-public class LoginHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class LoginHandler extends LoggedHandler {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -30,7 +30,7 @@ public class LoginHandler implements RequestHandler<Map<String, Object>, Map<Str
     }
 
     @Override
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         try {
             String body = (String) input.get("body");
             Map<String, Object> requestBody = MAPPER.readValue(body, new TypeReference<>() {});

@@ -17,6 +17,11 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>com.cloudcart</groupId>
+            <artifactId>cloudcart-common</artifactId>
+            <version>1.0.0</version>
+        </dependency>
 
         <!-- AWS SDK v2 - DynamoDB -->
         <dependency>

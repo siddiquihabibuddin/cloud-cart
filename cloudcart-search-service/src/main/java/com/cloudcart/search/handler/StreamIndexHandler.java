@@ -1,7 +1,7 @@
 package com.cloudcart.search.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.search.model.ProductDocument;
 import com.cloudcart.search.repository.OpenSearchRepository;
 
@@ -9,13 +9,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class StreamIndexHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class StreamIndexHandler extends LoggedHandler {
 
     private static final OpenSearchRepository REPO = new OpenSearchRepository();
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> event, Context context) {
+    protected Map<String, Object> process(Map<String, Object> event, Context context) {
         List<Map<String, String>> batchItemFailures = new ArrayList<>();
 
         List<Map<String, Object>> records = (List<Map<String, Object>>) event.get("Records");

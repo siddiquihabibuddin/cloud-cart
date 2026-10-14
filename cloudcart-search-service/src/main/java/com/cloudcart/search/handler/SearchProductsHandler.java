@@ -1,7 +1,7 @@
 package com.cloudcart.search.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.search.model.ProductDocument;
 import com.cloudcart.search.repository.OpenSearchRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,14 +9,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 
-public class SearchProductsHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class SearchProductsHandler extends LoggedHandler {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final OpenSearchRepository REPO = new OpenSearchRepository();
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> event, Context context) {
+    protected Map<String, Object> process(Map<String, Object> event, Context context) {
         try {
             Map<String, String> params = (Map<String, String>) event.get("queryStringParameters");
             if (params == null || params.get("q") == null || params.get("q").isBlank()) {

@@ -1,9 +1,9 @@
 package com.cloudcart.shipment.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.shipment.model.PaymentSuccessEvent;
-import com.cloudcart.shipment.util.JsonLogger;
+import com.cloudcart.common.log.JsonLogger;
 import com.cloudcart.shipment.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -21,7 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class ProcessShipmentHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class ProcessShipmentHandler extends LoggedHandler {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Shipments");
@@ -44,7 +44,7 @@ public class ProcessShipmentHandler implements RequestHandler<Map<String, Object
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         JsonLogger logger = new JsonLogger("shipment-service", null);
         List<Map<String, String>> failedItems = new ArrayList<>();
 

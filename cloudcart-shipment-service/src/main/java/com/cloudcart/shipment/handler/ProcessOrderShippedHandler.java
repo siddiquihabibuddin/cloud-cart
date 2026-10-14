@@ -1,9 +1,9 @@
 package com.cloudcart.shipment.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.shipment.model.OrderShippedEvent;
-import com.cloudcart.shipment.util.JsonLogger;
+import com.cloudcart.common.log.JsonLogger;
 import com.cloudcart.shipment.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -25,7 +25,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-public class ProcessOrderShippedHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class ProcessOrderShippedHandler extends LoggedHandler {
+
+    public ProcessOrderShippedHandler() {
+        super("order-shipped-processor");
+    }
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Shipping");
@@ -55,7 +59,7 @@ public class ProcessOrderShippedHandler implements RequestHandler<Map<String, Ob
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         JsonLogger logger = new JsonLogger("order-shipped-processor", null);
         List<Map<String, String>> failedItems = new ArrayList<>();
 

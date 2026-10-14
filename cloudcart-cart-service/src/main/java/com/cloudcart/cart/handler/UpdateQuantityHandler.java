@@ -1,7 +1,7 @@
 package com.cloudcart.cart.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.cart.repository.CartRepository;
 import com.cloudcart.cart.util.JwtVerificationException;
 import com.cloudcart.cart.util.JwtVerifier;
@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
-public class UpdateQuantityHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class UpdateQuantityHandler extends LoggedHandler {
 
     private static final CartRepository REPOSITORY = new CartRepository();
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -17,7 +17,7 @@ public class UpdateQuantityHandler implements RequestHandler<Map<String, Object>
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         try {
             String authenticatedUserId;
             try {

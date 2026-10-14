@@ -18,6 +18,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.cloudcart</groupId>
+            <artifactId>cloudcart-common</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>dynamodb</artifactId>
             <version>2.25.22</version>
