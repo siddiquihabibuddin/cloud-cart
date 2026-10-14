@@ -64,6 +64,10 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Func
    OpenSearch container :9200        MCP server :8090 (Spring Boot, needs GROQ_API_KEY)
    (Floci only; LocalStack makes          ▲
     a real OpenSearch domain)             └── agent Lambda ──► Groq API
+
+ Lambda stdout ─┐
+ MCP server log ─┼─► Alloy ─► Loki ─► Grafana :3001   (every request/response, searchable by correlation id)
+ frontend log  ─┘
 ```
 
 ### Search Architecture
@@ -176,6 +180,7 @@ A floating chat widget in the Next.js frontend lets users search products, manag
 | `cloudcart-agent-service` | Java 21 Lambda | REST API | — (stateless; calls Groq + `cloudcart-mcp-server`) |
 | `cloudcart-mcp-server` | Spring Boot (not a Lambda) | HTTP (Streamable HTTP MCP) | — (calls product/cart/order services via the gateway) |
 | `cloudcart-frontend` | Next.js | — | — |
+| `cloudcart-common` | Java library (no runtime) | — | — (shared logging: `JsonLogger`, `Redactor`, `LoggedHandler`, `LoggedHttp`, `Messaging`; shaded into every Lambda JAR) |
 
 ## API Routes
 
@@ -375,6 +380,8 @@ The AWS emulator is selected with `EMULATOR` (default **`floci`**):
 | Cost / account | Free, no token | Needs a LocalStack account + `LOCALSTACK_AUTH_TOKEN` (read from `~/.localstack/auth.json` if unset) |
 | Deployed stacks survive `./stop.sh` + `./start.sh` | Yes (persistent volume in `.dev/floci-data`) | No (in memory) — redeploy each time |
 | OpenSearch | Plain `opensearch` container started by `start.sh` (Floci stubs `AWS::OpenSearchService::Domain`) | Real domain created by the search stack |
+
+`./start.sh` also starts Loki, Alloy and Grafana for searching logs at http://localhost:3001 (see [Logging](#logging)); `OBSERVABILITY=off ./start.sh` skips them.
 
 Both listen on `:4566` and serve API Gateway at `/restapis/<id>/dev/_user_request_/`, so templates and frontend config are identical. Only one can run at a time: `EMULATOR=localstack ./start.sh` (and `EMULATOR=localstack ./stop.sh`) switch emulators. After an image/license error, `./start.sh --update` pulls the latest image and recreates the container (stacks must then be redeployed).
 
@@ -585,11 +592,60 @@ Each message body contains:
 
 Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` via the AWS console or CloudFormation to fan out notifications to real consumers.
 
+## Logging
+
+Every request and response is logged as one JSON object per line, from the browser's API call through the Lambdas, SQS/SNS hops, the agent's calls to Groq, the MCP server and its calls back into the gateway. One **correlation id** follows a request across all of them: the frontend generates an `X-Correlation-Id` per API call (API Gateway's request id is the fallback), Lambdas forward it on outbound HTTP and as an SQS/SNS `correlationId` message attribute, the agent forwards it to the MCP server, and the MCP server forwards it to the gateway.
+
+### Events
+
+Every line has `timestamp`, `level`, `service`, `correlationId`, `message`; request/response lines add `event` and more:
+
+| `event` | Emitted by | Key fields |
+|---|---|---|
+| `http.in` / `http.out` | every API Lambda; MCP server (`http.in`) | method, path, redacted headers + body; status, durationMs |
+| `batch.in`, `sqs.in`, `stream.in`, `invoke.in/out` | SQS / DynamoDB-stream / scheduled Lambdas | messageId, redacted body, durationMs |
+| `sqs.out` / `sns.out` | order, payment, shipment | queue/topic, messageId, redacted body |
+| `client.request` / `client.response` | order → product API, search → OpenSearch, MCP server → gateway | target, url, status, durationMs, redacted body |
+| `llm.request` / `llm.response` | agent → Groq | messages (tool *names* only), status, durationMs, **promptTokens / completionTokens / totalTokens**, finishReason, rate-limit headers |
+| `mcp.request` / `mcp.response` | agent → MCP server (`tools/list`, `tools/call`) | tool, redacted arguments/result, durationMs, isError |
+| `tool.call` | agent and MCP server | tool, redacted arguments + result, durationMs, failed |
+| `agent.turn` | agent | iterations, toolCalls, **totalTokens** for the whole chat turn |
+
+### Finding a request
+
+Open **Grafana → CloudCart Logs** (http://localhost:3001, no login). Paste a correlation id into the box to see every hop of that request, oldest first. The same query in Explore:
+
+```logql
+{service=~".+"} | correlation_id="<id>"
+```
+
+Other useful queries: `{level="ERROR"}`, `{event="llm.response"} | json | totalTokens > 1000`, `{service="agent-service", event="tool.call"} | json | failed="true"`. The dashboard also charts tokens per Groq call, Groq latency, errors and log volume by service. The browser shows a request's id in the chat widget's error message ("ref: ..."), and `NEXT_PUBLIC_LOG_HTTP=true` makes the browser console print one line per API call with its id.
+
+Without Grafana: Lambda output is in `docker logs floci` (lines prefixed `[lambda:<Function>]`), the MCP server in `.dev/mcp.log`, the frontend in `.dev/frontend.log`; `grep` for the correlation id.
+
+### Switches
+
+| Setting | Where | Default | Effect |
+|---|---|---|---|
+| `LOG_LEVEL` | Lambda / MCP env | `INFO` | `DEBUG`, `INFO`, `WARN` or `ERROR` |
+| `LOG_BODIES` | Lambda / MCP env | `true` | `false` logs metadata only (no request/response bodies) |
+| `LOG_MAX_BODY_CHARS` | Lambda / MCP env | `4000` | bodies longer than this are truncated (`…[truncated N chars]`) |
+| `OBSERVABILITY` | shell, for `start.sh` | `on` | `off` skips Loki/Alloy/Grafana |
+
+The Lambda settings are plain environment variables on a function, e.g. `aws --endpoint-url http://localhost:4566 lambda update-function-configuration --function-name RegisterFunctionDev --environment '{"Variables":{...existing..., "LOG_BODIES":"false"}}'` (they are not templated, so a redeploy resets them).
+
+### Redaction and privacy
+
+Secrets are masked before anything is written: values of `password`, `token`, `authToken`, `authorization`, `x-api-key`, `apiKey`, `secret`, `cookie`, `jwt` (JSON keys and HTTP headers), plus bearer tokens, JWTs and `gsk_...` Groq keys wherever they appear, even inside a chat message. **Logged bodies still contain personal data**: emails, order contents and the full text of chat messages and model replies. That is intended for local development; use `LOG_BODIES=false` anywhere else.
+
+Not logged: DynamoDB calls (too noisy) and API Gateway access logs (the Lambdas' `http.in/out` cover each route). Loki keeps 7 days of logs in the `cloudcart-loki-data` Docker volume; `docker volume rm cloudcart-loki-data cloudcart-grafana-data` resets it.
+
 ## Tech Stack
 
 - **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch (a container on Floci), API Gateway (REST v1)
 - **Shopping Assistant**: [Groq](https://groq.com) (free-tier, OpenAI-compatible chat completions, `openai/gpt-oss-120b`), [Model Context Protocol](https://modelcontextprotocol.io) — `io.modelcontextprotocol.sdk` (raw Java client, in the plain-Java `cloudcart-agent-service` Lambda) + Spring AI's MCP server starter (in the standalone `cloudcart-mcp-server` process only — the only piece of CloudCart that uses Spring)
 - **Frontend (Next.js)**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios
 - **Frontend (Angular)**: Angular 16, TypeScript, Tailwind CSS, Angular HttpClient
+- **Observability**: structured JSON logs (`cloudcart-common`), [Grafana Loki](https://grafana.com/oss/loki/) + [Grafana Alloy](https://grafana.com/docs/alloy/) + Grafana
 - **Infrastructure**: AWS CloudFormation, Terraform (HCL), [Floci](https://github.com/floci-io/floci) (default local emulator) or LocalStack, Docker
 - **Build**: Maven (Shade plugin for fat JARs; Spring Boot plugin for `cloudcart-mcp-server`)
