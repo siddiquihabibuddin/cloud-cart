@@ -24,6 +24,8 @@ import java.util.Set;
 public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
     private static final int MAX_TOOL_ITERATIONS = 5;
+    static final int MAX_HISTORY_MESSAGES = 12;
+    static final int MAX_TOOL_RESULT_CHARS = 2000;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -68,7 +70,7 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
             }
 
             List<Message> history = requestBody.get("history") != null
-                    ? MAPPER.convertValue(requestBody.get("history"), new TypeReference<List<Message>>() {})
+                    ? trimHistory(MAPPER.convertValue(requestBody.get("history"), new TypeReference<List<Message>>() {}))
                     : new ArrayList<>();
 
             List<Message> messages = new ArrayList<>();
@@ -105,22 +107,54 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
                     context.getLogger().log("tool_call name=" + toolCall.getFunction().getName()
                             + " args=" + toolCall.getFunction().getArguments()
                             + " result=" + result);
-                    messages.add(Message.tool(toolCall.getId(), result));
+                    messages.add(Message.tool(toolCall.getId(), truncateToolResult(result)));
                 }
             }
 
             if (reply == null) {
                 reply = "Sorry, I wasn't able to finish that request - could you try rephrasing it?";
-                messages.add(new Message("assistant", reply));
             }
 
-            List<Message> newHistory = messages.subList(1, messages.size());
+            // Tool calls and results only live for this request's loop; the client keeps just the
+            // user/assistant text so every later turn resends far fewer tokens.
+            List<Message> newHistory = new ArrayList<>(history);
+            newHistory.add(new Message("user", userMessage));
+            newHistory.add(new Message("assistant", reply));
+            newHistory = trimHistory(newHistory);
             String responseBody = MAPPER.writeValueAsString(Map.of("reply", reply, "history", newHistory));
             return response(200, responseBody);
         } catch (Exception e) {
             context.getLogger().log("AgentChatHandler error: " + e.getMessage());
             return response(500, "{\"error\":\"Failed to process chat message\"}");
         }
+    }
+
+    /**
+     * Keeps only plain user/assistant text turns (dropping tool calls/results, and anything a
+     * client may have forged there) and caps the window at {@link #MAX_HISTORY_MESSAGES},
+     * always starting on a user message so the model never sees an orphaned reply.
+     */
+    static List<Message> trimHistory(List<Message> history) {
+        List<Message> text = new ArrayList<>();
+        for (Message m : history) {
+            boolean roleOk = "user".equals(m.getRole()) || "assistant".equals(m.getRole());
+            boolean hasToolCalls = m.getToolCalls() != null && !m.getToolCalls().isEmpty();
+            if (roleOk && !hasToolCalls && m.getContent() != null && !m.getContent().isBlank()) {
+                text.add(new Message(m.getRole(), m.getContent()));
+            }
+        }
+        int start = Math.max(0, text.size() - MAX_HISTORY_MESSAGES);
+        while (start < text.size() && !"user".equals(text.get(start).getRole())) {
+            start++;
+        }
+        return new ArrayList<>(text.subList(start, text.size()));
+    }
+
+    static String truncateToolResult(String result) {
+        if (result == null || result.length() <= MAX_TOOL_RESULT_CHARS) {
+            return result;
+        }
+        return result.substring(0, MAX_TOOL_RESULT_CHARS) + "...[truncated]";
     }
 
     /**
@@ -164,6 +198,8 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
         return "You are CloudCart's shopping assistant. Use the available tools to look up products, "
                 + "manage the user's cart, and check or place orders. Never invent product ids, prices, or "
                 + "order ids - always look them up first. Keep replies short and friendly. "
+                + "Earlier tool results are not kept between turns, so whenever you mention a product, cart "
+                + "item or order, include its id in your reply so you can refer to it later. "
                 + "The current user's id is \"" + userId + "\".";
     }
 

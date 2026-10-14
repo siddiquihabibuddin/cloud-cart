@@ -13,6 +13,8 @@ import java.util.Map;
 @Component
 public class ProductTools {
 
+    static final int MAX_SEARCH_RESULTS = 5;
+
     private final RestClient restClient;
 
     public ProductTools(RestClient cloudCartRestClient) {
@@ -29,23 +31,22 @@ public class ProductTools {
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, Object>>() {});
 
-            if (maxPrice == null || result == null) {
+            if (result == null || !(result.get("products") instanceof List<?> products)) {
                 return result;
             }
-            Object productsObj = result.get("products");
-            if (!(productsObj instanceof List<?> products)) {
-                return result;
-            }
-            List<Object> filtered = new ArrayList<>();
+            List<Object> matches = new ArrayList<>();
             for (Object p : products) {
-                if (p instanceof Map<?, ?> product) {
-                    Object price = product.get("price");
-                    if (price instanceof Number number && number.doubleValue() <= maxPrice) {
-                        filtered.add(product);
-                    }
+                if (maxPrice == null) {
+                    matches.add(p);
+                } else if (p instanceof Map<?, ?> product
+                        && product.get("price") instanceof Number number
+                        && number.doubleValue() <= maxPrice) {
+                    matches.add(product);
                 }
             }
-            return Map.of("products", filtered, "total", filtered.size());
+            List<Object> shown = matches.size() > MAX_SEARCH_RESULTS
+                    ? matches.subList(0, MAX_SEARCH_RESULTS) : matches;
+            return Map.of("products", shown, "total", matches.size());
         } catch (Exception e) {
             return ToolErrors.from(e);
         }
