@@ -1,6 +1,6 @@
 # CloudCart
 
-A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Functions, and Next.js — running locally via LocalStack.
+A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Functions, and Next.js — running locally on [Floci](https://github.com/floci-io/floci), a free AWS emulator (LocalStack is also supported).
 
 ## Screenshots
 
@@ -46,6 +46,26 @@ A serverless e-commerce platform built with AWS Lambda, DynamoDB, SQS, Step Func
     └───────────────────┘  └────┘  └────────────────┘  └──────────────────┘
 ```
 
+### Local Runtime
+
+`./start.sh` brings up everything below; `./stop.sh` tears it down. Lambdas run as Docker containers that the emulator launches through the Docker socket, and reach host-side services at `host.docker.internal`.
+
+```
+ Browser ──► Next.js dev server :3000 ──► rewrites (/api-*) ──┐
+                                                               ▼
+        ┌──────────────────────── AWS emulator :4566 ───────────────────────┐
+        │  Floci (default)  or  LocalStack  —  EMULATOR=floci|localstack     │
+        │  API Gateway · CloudFormation · Lambda · DynamoDB(+Streams) · SQS   │
+        │  SNS · EventBridge · Step Functions · CloudWatch · S3 (JAR bucket)  │
+        └─────┬───────────────────────────────┬───────────────────────────────┘
+              │ Lambda containers              │ Lambda containers
+              │ (host.docker.internal)         │
+              ▼                                ▼
+   OpenSearch container :9200        MCP server :8090 (Spring Boot, needs GROQ_API_KEY)
+   (Floci only; LocalStack makes          ▲
+    a real OpenSearch domain)             └── agent Lambda ──► Groq API
+```
+
 ### Search Architecture
 
 Product writes to `ProductsTableDev` emit DynamoDB Stream events. `StreamIndexFunctionDev` consumes the stream and keeps the OpenSearch index in sync automatically. For initial or manual reindexing, `BulkReindexFunctionDev` scans the full table and bulk-loads it into OpenSearch.
@@ -58,6 +78,7 @@ POST /products  ──► ProductsTableDev  ──► DynamoDB Stream
                                                ▼
                                           OpenSearch
                                         (cloudcart-search-dev)
+                                  on Floci: a plain opensearch container
                                                ▲
                           GET /search?q=... ───┘ (multi_match: title^2, category)
 ```
@@ -132,7 +153,7 @@ A floating chat widget in the Next.js frontend lets users search products, manag
         openai/gpt-oss-120b
 ```
 
-`cloudcart-agent-service` is a Lambda like its siblings — plain Java, no Spring, deployed via `cloudcart-agent-template.yaml`. `cloudcart-mcp-server` is deliberately **not** a Lambda: MCP is a stateful, session-based protocol, so it runs as a normal long-lived Spring Boot process (`mvn spring-boot:run`) alongside LocalStack, reachable from Lambda containers at `http://host.docker.internal:8090`. Tool definitions live in the MCP server (`@Tool`-annotated methods), not hardcoded in the Lambda — the agent fetches them at runtime via `tools/list`.
+`cloudcart-agent-service` is a Lambda like its siblings — plain Java, no Spring, deployed via `cloudcart-agent-template.yaml`. `cloudcart-mcp-server` is deliberately **not** a Lambda: MCP is a stateful, session-based protocol, so it runs as a normal long-lived Spring Boot process (`mvn spring-boot:run`, started for you by `./start.sh` when `GROQ_API_KEY` is set) alongside the emulator, reachable from Lambda containers at `http://host.docker.internal:8090`. Tool definitions live in the MCP server (`@Tool`-annotated methods), not hardcoded in the Lambda — the agent fetches them at runtime via `tools/list`.
 
 ## Services
 
@@ -186,7 +207,7 @@ Customers can view all their past orders at `/orders`. The page lists each order
 |---|---|---|
 | `POST` | `/agent/chat` | Chat with the AI shopping assistant — body: `{"userId":"...","message":"...","history":[...]}`, returns `{"reply":"...","history":[...]}`. `history` is opaque and should be echoed back verbatim on the next call to keep conversation context. |
 
-Requires `cloudcart-mcp-server` to be running (see [Shopping Assistant (Groq + MCP)](#shopping-assistant-groq--mcp)) and a `GROQ_API_KEY` set when deploying — the route silently doesn't exist if `GROQ_API_KEY` wasn't set at deploy time.
+Requires `cloudcart-mcp-server` to be running (see [Shopping Assistant (Groq + MCP)](#shopping-assistant-groq--mcp)) and a `GROQ_API_KEY` exported when running `deploy-localstack.sh` — the route is only wired up (`IncludeAgentRoute=true` on the gateway stack) when the key was set at deploy time; otherwise the rest of the API still deploys and `/agent/chat` simply doesn't exist.
 
 ### Orders
 All order endpoints require `x-api-key: cloudcart-dev-key-2024`.
@@ -328,7 +349,8 @@ The Angular app uses the same four proxy paths (`/api-products`, `/api-cart`, `/
 - Docker
 - Java 21 + Maven
 - Node.js 20+
-- AWS CLI v2 (talks to the local emulator; fake credentials are supplied by the scripts). With `EMULATOR=localstack` you also need `awslocal` (`pip install awscli-local`)
+- AWS CLI v2 (the scripts point it at the local emulator with fake credentials)
+- Optional: `awslocal` (`pip install awscli-local`) for the manual commands later in this README. It targets `localhost:4566`, so it works with either emulator
 - No account or token is needed for the default emulator, [Floci](https://github.com/floci-io/floci) (free, MIT)
 - A free [Groq](https://console.groq.com) API key — only needed for the shopping assistant (`cloudcart-agent-service` + `cloudcart-mcp-server`); everything else works without it
 
@@ -403,7 +425,12 @@ bash deploy-localstack.sh
 Builds all six JARs, uploads them to S3, and deploys CloudFormation stacks in dependency order:
 `cart` + `products` → `order` → `payment` → `shipment` → `search` → `gateway`
 
-The script also enables DynamoDB Streams on `ProductsTableDev` (required for real-time search indexing) and passes the stream ARN to the search stack as a parameter, working around a LocalStack limitation where `!GetAtt Table.StreamArn` returns `"unknown"` in CloudFormation.
+The script reads `EMULATOR` (default `floci`) and:
+- passes the DynamoDB stream ARN to the search stack as a parameter (on LocalStack it first enables the stream via the CLI, working around `!GetAtt Table.StreamArn` returning `"unknown"`; Floci returns a real ARN),
+- on Floci, passes the `opensearch` container's endpoint to the search stack, because Floci doesn't emulate `AWS::OpenSearchService::Domain`,
+- passes `IncludeAgentRoute=true` to the gateway stack only when `GROQ_API_KEY` is set,
+- on LocalStack, forces a fresh API Gateway deployment (it can serve a stale stage),
+- writes the new gateway URL into `cloudcart-frontend/.env.local` and seeds products.
 
 ### 3. Configure the frontend
 
@@ -432,6 +459,8 @@ The search index stays in sync automatically via the DynamoDB Stream → `Stream
 
 ### 5. Start the frontend
 
+`./start.sh` already starts it. To run it by hand:
+
 ```bash
 cd cloudcart-frontend
 npm install
@@ -457,7 +486,13 @@ export GROQ_API_KEY=<your-free-key>
 bash deploy-localstack.sh
 ```
 
-Then start the MCP server (a normal long-lived process, not a Lambda — see [Shopping Assistant (Groq + MCP)](#shopping-assistant-groq--mcp)) in a separate terminal, using the same gateway API id printed in the `UnifiedApiInternalUrl` output:
+Then restart so `start.sh` launches the MCP server (a normal long-lived process, not a Lambda — see [Shopping Assistant (Groq + MCP)](#shopping-assistant-groq--mcp)). Keep `GROQ_API_KEY` exported in that shell; without it the MCP server is skipped and chat is disabled:
+
+```bash
+./stop.sh && ./start.sh
+```
+
+`start.sh` finds the gateway itself and logs the MCP server to `.dev/mcp.log`. To run it manually instead:
 
 ```bash
 cd cloudcart-mcp-server
@@ -547,9 +582,9 @@ Attach email, Lambda, or additional SQS subscribers to `OrderShippedTopicDev` vi
 
 ## Tech Stack
 
-- **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch, API Gateway (REST v1)
+- **Backend**: AWS Lambda (Java 21), DynamoDB, DynamoDB Streams, SQS, SNS, OpenSearch (a container on Floci), API Gateway (REST v1)
 - **Shopping Assistant**: [Groq](https://groq.com) (free-tier, OpenAI-compatible chat completions, `openai/gpt-oss-120b`), [Model Context Protocol](https://modelcontextprotocol.io) — `io.modelcontextprotocol.sdk` (raw Java client, in the plain-Java `cloudcart-agent-service` Lambda) + Spring AI's MCP server starter (in the standalone `cloudcart-mcp-server` process only — the only piece of CloudCart that uses Spring)
 - **Frontend (Next.js)**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios
 - **Frontend (Angular)**: Angular 16, TypeScript, Tailwind CSS, Angular HttpClient
-- **Infrastructure**: AWS CloudFormation, Terraform (HCL), LocalStack Pro
+- **Infrastructure**: AWS CloudFormation, Terraform (HCL), [Floci](https://github.com/floci-io/floci) (default local emulator) or LocalStack, Docker
 - **Build**: Maven (Shade plugin for fat JARs; Spring Boot plugin for `cloudcart-mcp-server`)
