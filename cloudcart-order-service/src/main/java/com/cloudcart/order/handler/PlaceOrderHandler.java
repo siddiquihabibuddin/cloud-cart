@@ -1,13 +1,15 @@
 package com.cloudcart.order.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.order.model.Order;
 import com.cloudcart.order.model.OrderItem;
 import com.cloudcart.order.model.OrderPlacedEvent;
 import com.cloudcart.order.repository.OrderRepository;
 import com.cloudcart.order.repository.SagaRepository;
-import com.cloudcart.order.util.JsonLogger;
+import com.cloudcart.common.http.LoggedHttp;
+import com.cloudcart.common.log.JsonLogger;
+import com.cloudcart.common.messaging.Messaging;
 import com.cloudcart.order.util.JwtVerificationException;
 import com.cloudcart.order.util.JwtVerifier;
 import com.cloudcart.order.util.MetricsEmitter;
@@ -25,7 +27,6 @@ import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
-import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -40,7 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class PlaceOrderHandler extends LoggedHandler {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final OrderRepository REPOSITORY = new OrderRepository();
@@ -50,6 +51,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
+    private static final LoggedHttp PRODUCT_API = new LoggedHttp(HTTP_CLIENT, "order-service", "product-api");
     private static final String QUEUE_URL = System.getenv("ORDER_QUEUE_URL");
     private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
     private static final String IDEMPOTENCY_TABLE = System.getenv("IDEMPOTENCY_TABLE");
@@ -79,7 +81,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         Map<String, Object> headers = (Map<String, Object>) input.get("headers");
         JsonLogger logger = JsonLogger.fromHeaders("order-service", headers);
 
@@ -247,10 +249,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
             // a conditional update on attribute_exists(orderId).
             OrderPlacedEvent event = new OrderPlacedEvent(orderId, userId, items, total);
             String eventJson = MAPPER.writeValueAsString(event);
-            SQS_CLIENT.sendMessage(SendMessageRequest.builder()
-                    .queueUrl(QUEUE_URL)
-                    .messageBody(eventJson)
-                    .build());
+            Messaging.sendSqs(SQS_CLIENT, QUEUE_URL, eventJson, logger);
 
             // --- Persist the order ---
             REPOSITORY.saveOrder(order);
@@ -329,7 +328,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
                     .timeout(Duration.ofSeconds(10))
                     .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = PRODUCT_API.send(req, body);
             return resp.statusCode();
         } catch (HttpTimeoutException e) {
             logger.error("Timeout calling reserve stock", Map.of("productId", productId));
@@ -350,7 +349,7 @@ public class PlaceOrderHandler implements RequestHandler<Map<String, Object>, Ma
                     .timeout(Duration.ofSeconds(10))
                     .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = PRODUCT_API.send(req, body);
             return resp.statusCode();
         } catch (HttpTimeoutException e) {
             logger.error("Timeout calling release stock", Map.of("productId", productId));

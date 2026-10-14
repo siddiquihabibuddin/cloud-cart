@@ -27,6 +27,10 @@ AUTH_JAR="auth-service-1.0.0.jar"
 # Generate one if the caller didn't supply one, so a fresh environment just works.
 JWT_SECRET="${JWT_SECRET:-$(openssl rand -hex 32)}"
 
+# Shared logging module: every service depends on it, so it must be installed first
+echo "==> Building shared logging module..."
+mvn -f cloudcart-common/pom.xml install -q -DskipTests
+
 echo "==> Building cart service..."
 mvn -f "$CART_DIR/pom.xml" package -q -DskipTests
 

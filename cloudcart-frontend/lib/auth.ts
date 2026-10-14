@@ -1,8 +1,9 @@
 import axios from "axios";
+import { attachCorrelation } from "./correlation";
 
-const authApi = axios.create({
+const authApi = attachCorrelation(axios.create({
   baseURL: process.env.NEXT_PUBLIC_AUTH_API,
-});
+}));
 
 export interface AuthResponse {
   token: string;

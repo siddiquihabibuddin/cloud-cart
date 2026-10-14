@@ -15,6 +15,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.cloudcart</groupId>
+            <artifactId>cloudcart-common</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-lambda-java-core</artifactId>
             <version>1.2.3</version>

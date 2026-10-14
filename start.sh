@@ -32,7 +32,7 @@ start_mcp() {
   fi
   log "Starting MCP server on :$MCP_PORT (logs: .dev/mcp.log)..."
   (cd "$ROOT/cloudcart-mcp-server" && UNIFIED_API_URL="$url" nohup mvn -q spring-boot:run </dev/null \
-    >"$STATE_DIR/mcp.log" 2>&1 &)
+    >>"$STATE_DIR/mcp.log" 2>&1 &)
   wait_for_port "$MCP_PORT" 90 || warn "MCP server not listening yet; check .dev/mcp.log"
 }
 
@@ -43,7 +43,7 @@ start_frontend() {
   fi
   [ -d "$ROOT/cloudcart-frontend/node_modules" ] || { log "Installing frontend dependencies..."; (cd "$ROOT/cloudcart-frontend" && npm install); }
   log "Starting frontend on :$FRONTEND_PORT (logs: .dev/frontend.log)..."
-  (cd "$ROOT/cloudcart-frontend" && nohup npm run dev </dev/null >"$STATE_DIR/frontend.log" 2>&1 &)
+  (cd "$ROOT/cloudcart-frontend" && nohup npm run dev </dev/null >>"$STATE_DIR/frontend.log" 2>&1 &)
   wait_for_port "$FRONTEND_PORT" 60 && log "Frontend: http://localhost:$FRONTEND_PORT" \
     || warn "frontend not listening yet; check .dev/frontend.log"
 }
@@ -53,6 +53,9 @@ status() {
   if [ "$EMULATOR" = "floci" ]; then
     container_running "$OPENSEARCH_CONTAINER" && echo "opensearch: running (:$OPENSEARCH_PORT)" || echo "opensearch: stopped"
   fi
+  if observability_enabled; then
+    container_running "$GRAFANA_CONTAINER" && echo "grafana: running (http://localhost:$GRAFANA_PORT)" || echo "grafana: stopped"
+  fi
   [ -n "$(port_pids "$MCP_PORT")" ] && echo "mcp server: running (:$MCP_PORT)" || echo "mcp server: stopped"
   [ -n "$(port_pids "$FRONTEND_PORT")" ] && echo "frontend: running (:$FRONTEND_PORT)" || echo "frontend: stopped"
 }
@@ -60,6 +63,7 @@ status() {
 log "Emulator: $EMULATOR"
 emulator_start "${1:-}"
 opensearch_start
+observability_start
 start_mcp
 start_frontend
 echo ""

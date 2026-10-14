@@ -1,7 +1,6 @@
 package com.cloudcart.agent.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.cloudcart.agent.client.GroqClient;
 import com.cloudcart.agent.client.HttpGroqClient;
 import com.cloudcart.agent.mcp.McpToolBridge;
@@ -12,16 +11,19 @@ import com.cloudcart.agent.model.ToolCall;
 import com.cloudcart.agent.util.JwtVerificationException;
 import com.cloudcart.agent.util.JwtVerifier;
 import com.cloudcart.agent.util.NimbusJwtVerifier;
+import com.cloudcart.common.handler.LoggedHandler;
+import com.cloudcart.common.log.Redactor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class AgentChatHandler extends LoggedHandler {
 
     private static final int MAX_TOOL_ITERATIONS = 5;
     static final int MAX_HISTORY_MESSAGES = 12;
@@ -48,7 +50,7 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         try {
             String rawToken = extractBearerToken((Map<String, Object>) input.get("headers"));
             if (rawToken == null) {
@@ -58,6 +60,7 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
             try {
                 authenticatedUserId = jwtVerifier.verify(rawToken);
             } catch (JwtVerificationException e) {
+                logger().warn("JWT verification failed", Map.of("reason", String.valueOf(e.getMessage())));
                 return response(401, "{\"error\":\"Unauthorized\"}");
             }
 
@@ -82,8 +85,15 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
             Map<String, Set<String>> toolParameterNames = indexToolParameterNames(tools);
 
             String reply = null;
+            int iterations = 0;
+            int toolCallCount = 0;
+            int totalTokens = 0;
             for (int i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+                iterations++;
                 ChatCompletionResponse completion = groqClient.complete(messages, tools);
+                if (completion.getUsage() != null) {
+                    totalTokens += completion.getUsage().getTotalTokens();
+                }
                 Message assistantMessage = completion.getChoices().get(0).getMessage();
                 messages.add(assistantMessage);
 
@@ -94,6 +104,9 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
                 }
 
                 for (ToolCall toolCall : toolCalls) {
+                    toolCallCount++;
+                    long toolStart = System.nanoTime();
+                    boolean toolFailed = false;
                     String result;
                     try {
                         Set<String> allowedParams = toolParameterNames.getOrDefault(
@@ -102,21 +115,36 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
                                 toolCall.getFunction().getArguments(), authenticatedUserId, rawToken, allowedParams);
                         result = toolBridge.callTool(toolCall.getFunction().getName(), trustedArgs);
                     } catch (Exception toolEx) {
+                        toolFailed = true;
                         result = MAPPER.writeValueAsString(Map.of("error", String.valueOf(toolEx.getMessage())));
                     }
-                    context.getLogger().log("tool_call name=" + toolCall.getFunction().getName()
-                            + " args=" + toolCall.getFunction().getArguments()
-                            + " result=" + result);
+                    Map<String, Object> toolLog = new LinkedHashMap<>();
+                    toolLog.put("tool", toolCall.getFunction().getName());
+                    toolLog.put("toolCallId", toolCall.getId());
+                    toolLog.put("arguments", Redactor.body(toolCall.getFunction().getArguments()));
+                    toolLog.put("failed", toolFailed);
+                    toolLog.put("durationMs", (System.nanoTime() - toolStart) / 1_000_000);
+                    toolLog.put("result", Redactor.body(result));
+                    logger().event("tool.call", "Tool " + toolCall.getFunction().getName() + (toolFailed ? " failed" : " completed"), toolLog);
                     messages.add(Message.tool(toolCall.getId(), truncateToolResult(result)));
                 }
             }
 
+            boolean answered = reply != null;
             if (reply == null) {
                 reply = "Sorry, I wasn't able to finish that request - could you try rephrasing it?";
             }
 
             // Tool calls and results only live for this request's loop; the client keeps just the
             // user/assistant text so every later turn resends far fewer tokens.
+            Map<String, Object> turn = new LinkedHashMap<>();
+            turn.put("iterations", iterations);
+            turn.put("toolCalls", toolCallCount);
+            turn.put("totalTokens", totalTokens);
+            turn.put("answered", answered);
+            turn.put("historyMessages", history.size());
+            logger().event("agent.turn", "Chat turn finished", turn);
+
             List<Message> newHistory = new ArrayList<>(history);
             newHistory.add(new Message("user", userMessage));
             newHistory.add(new Message("assistant", reply));
@@ -124,7 +152,7 @@ public class AgentChatHandler implements RequestHandler<Map<String, Object>, Map
             String responseBody = MAPPER.writeValueAsString(Map.of("reply", reply, "history", newHistory));
             return response(200, responseBody);
         } catch (Exception e) {
-            context.getLogger().log("AgentChatHandler error: " + e.getMessage());
+            logger().error("AgentChatHandler error", Map.of("userMessageProcessed", false), e);
             return response(500, "{\"error\":\"Failed to process chat message\"}");
         }
     }

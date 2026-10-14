@@ -1,6 +1,21 @@
 server:
   port: 8090
 
+# One JSON object per line (same keys as the Lambdas: timestamp, level, service, message) so Loki
+# ingests framework logs and our request/response events uniformly.
+logging:
+  structured:
+    format:
+      console: logstash
+    json:
+      rename:
+        "[@timestamp]": timestamp
+      exclude:
+        - "@version"
+        - level_value
+      add:
+        service: mcp-server
+
 spring:
   ai:
     mcp:

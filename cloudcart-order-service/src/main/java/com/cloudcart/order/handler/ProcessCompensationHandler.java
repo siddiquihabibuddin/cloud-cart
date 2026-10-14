@@ -1,11 +1,12 @@
 package com.cloudcart.order.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.order.model.OrderItem;
 import com.cloudcart.order.model.StockCompensationEvent;
 import com.cloudcart.order.repository.SagaRepository;
-import com.cloudcart.order.util.JsonLogger;
+import com.cloudcart.common.http.LoggedHttp;
+import com.cloudcart.common.log.JsonLogger;
 import com.cloudcart.order.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -24,7 +25,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class ProcessCompensationHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class ProcessCompensationHandler extends LoggedHandler {
+
+    public ProcessCompensationHandler() {
+        super("compensation-service");
+    }
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Compensation");
@@ -32,6 +37,7 @@ public class ProcessCompensationHandler implements RequestHandler<Map<String, Ob
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
+    private static final LoggedHttp PRODUCT_API = new LoggedHttp(HTTP_CLIENT, "compensation-service", "product-api");
     private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
 
     static {
@@ -53,7 +59,7 @@ public class ProcessCompensationHandler implements RequestHandler<Map<String, Ob
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         JsonLogger logger = new JsonLogger("compensation-service", null);
         List<Map<String, String>> failedItems = new ArrayList<>();
 
@@ -126,7 +132,7 @@ public class ProcessCompensationHandler implements RequestHandler<Map<String, Ob
                     .timeout(Duration.ofSeconds(10))
                     .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = PRODUCT_API.send(req, body);
             return resp.statusCode();
         } catch (HttpTimeoutException e) {
             logger.error("Timeout releasing stock", Map.of("productId", productId));

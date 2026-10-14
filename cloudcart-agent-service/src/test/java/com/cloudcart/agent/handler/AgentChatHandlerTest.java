@@ -4,6 +4,7 @@ import com.amazonaws.services.lambda.runtime.ClientContext;
 import com.amazonaws.services.lambda.runtime.CognitoIdentity;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
+import com.cloudcart.agent.LogCapture;
 import com.cloudcart.agent.client.GroqClient;
 import com.cloudcart.agent.mcp.ToolBridge;
 import com.cloudcart.agent.model.ChatCompletionResponse;
@@ -13,6 +14,8 @@ import com.cloudcart.agent.model.ToolCall;
 import com.cloudcart.agent.util.JwtVerificationException;
 import com.cloudcart.agent.util.JwtVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -20,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -31,6 +36,124 @@ import static org.mockito.Mockito.when;
 class AgentChatHandlerTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private LogCapture logs;
+
+    @BeforeEach
+    void captureLogs() {
+        logs = LogCapture.start();
+    }
+
+    @AfterEach
+    void releaseLogs() {
+        LogCapture.stop();
+    }
+
+    @Test
+    void logsEachToolCallAndTheTurnsTotalTokens() throws Exception {
+        GroqClient groqClient = mock(GroqClient.class);
+        ToolBridge toolBridge = mock(ToolBridge.class);
+        JwtVerifier jwtVerifier = mock(JwtVerifier.class);
+        when(jwtVerifier.verify("valid.jwt.token")).thenReturn("u1");
+        when(toolBridge.listGroqTools()).thenReturn(List.of(
+                Map.of("type", "function", "function", Map.of("name", "search_products"))));
+
+        ToolCall call = new ToolCall();
+        call.setId("call_1");
+        call.setType("function");
+        FunctionCall fn = new FunctionCall();
+        fn.setName("search_products");
+        fn.setArguments("{\"query\":\"lamp\"}");
+        call.setFunction(fn);
+        Message toolCallMessage = new Message("assistant", null);
+        toolCallMessage.setToolCalls(List.of(call));
+
+        ChatCompletionResponse first = completionOf(toolCallMessage);
+        first.setUsage(usage(1000, 50));
+        ChatCompletionResponse second = completionOf(new Message("assistant", "Found a lamp."));
+        second.setUsage(usage(1200, 40));
+        when(groqClient.complete(anyList(), anyList())).thenReturn(first).thenReturn(second);
+        when(toolBridge.callTool(eq("search_products"), anyString())).thenReturn("{\"products\":[]}");
+
+        new AgentChatHandler(groqClient, toolBridge, jwtVerifier).handleRequest(Map.of(
+                "httpMethod", "POST", "path", "/agent/chat",
+                "headers", Map.of("Authorization", "Bearer valid.jwt.token", "X-Correlation-Id", "turn-1"),
+                "body", "{\"message\":\"find a lamp\"}"), new NoOpContext());
+
+        Map<String, Object> tool = logs.event("tool.call");
+        assertEquals("search_products", tool.get("tool"));
+        assertEquals(false, tool.get("failed"));
+        assertEquals("turn-1", tool.get("correlationId"));
+
+        Map<String, Object> turn = logs.event("agent.turn");
+        assertEquals(2, ((Number) turn.get("iterations")).intValue());
+        assertEquals(1, ((Number) turn.get("toolCalls")).intValue());
+        assertEquals(2290, ((Number) turn.get("totalTokens")).intValue());
+        assertEquals(true, turn.get("answered"));
+
+        assertEquals(200, ((Number) logs.event("http.out").get("status")).intValue());
+        assertFalse(logs.anyLineContains("valid.jwt.token"), "the bearer token must never be logged");
+    }
+
+    @Test
+    void logsAFailedToolAndStillAnswers() throws Exception {
+        GroqClient groqClient = mock(GroqClient.class);
+        ToolBridge toolBridge = mock(ToolBridge.class);
+        JwtVerifier jwtVerifier = mock(JwtVerifier.class);
+        when(jwtVerifier.verify("valid.jwt.token")).thenReturn("u1");
+        when(toolBridge.listGroqTools()).thenReturn(List.of(
+                Map.of("type", "function", "function", Map.of("name", "view_cart"))));
+
+        ToolCall call = new ToolCall();
+        call.setId("call_9");
+        call.setType("function");
+        FunctionCall fn = new FunctionCall();
+        fn.setName("view_cart");
+        fn.setArguments("{}");
+        call.setFunction(fn);
+        Message toolCallMessage = new Message("assistant", null);
+        toolCallMessage.setToolCalls(List.of(call));
+        when(groqClient.complete(anyList(), anyList()))
+                .thenReturn(completionOf(toolCallMessage))
+                .thenReturn(completionOf(new Message("assistant", "Cart is unavailable.")));
+        when(toolBridge.callTool(eq("view_cart"), anyString())).thenThrow(new IllegalStateException("MCP down"));
+
+        Map<String, Object> result = new AgentChatHandler(groqClient, toolBridge, jwtVerifier).handleRequest(Map.of(
+                "httpMethod", "POST", "path", "/agent/chat",
+                "headers", Map.of("Authorization", "Bearer valid.jwt.token"),
+                "body", "{\"message\":\"what is in my cart\"}"), new NoOpContext());
+
+        assertEquals(200, result.get("statusCode"));
+        Map<String, Object> tool = logs.event("tool.call");
+        assertEquals(true, tool.get("failed"));
+        assertTrue(tool.get("result").toString().contains("MCP down"));
+    }
+
+    @Test
+    void logsTheStackWhenTheTurnFails() throws Exception {
+        GroqClient groqClient = mock(GroqClient.class);
+        ToolBridge toolBridge = mock(ToolBridge.class);
+        JwtVerifier jwtVerifier = mock(JwtVerifier.class);
+        when(jwtVerifier.verify("valid.jwt.token")).thenReturn("u1");
+        when(toolBridge.listGroqTools()).thenThrow(new IllegalStateException("tools/list timed out"));
+
+        Map<String, Object> result = new AgentChatHandler(groqClient, toolBridge, jwtVerifier).handleRequest(Map.of(
+                "httpMethod", "POST", "path", "/agent/chat",
+                "headers", Map.of("Authorization", "Bearer valid.jwt.token"),
+                "body", "{\"message\":\"hi\"}"), new NoOpContext());
+
+        assertEquals(500, result.get("statusCode"));
+        assertTrue(logs.anyLineContains("tools/list timed out"));
+        assertTrue(logs.anyLineContains("\"stack\""));
+    }
+
+    private static ChatCompletionResponse.Usage usage(int prompt, int completion) {
+        ChatCompletionResponse.Usage u = new ChatCompletionResponse.Usage();
+        u.setPromptTokens(prompt);
+        u.setCompletionTokens(completion);
+        u.setTotalTokens(prompt + completion);
+        return u;
+    }
 
     @Test
     void chainsAToolCallThenReturnsAFinalReply() throws Exception {

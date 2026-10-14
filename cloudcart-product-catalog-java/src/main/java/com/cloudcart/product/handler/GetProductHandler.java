@@ -1,20 +1,20 @@
 package com.cloudcart.product.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.product.model.Product;
 import com.cloudcart.product.repository.ProductRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
-public class GetProductHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class GetProductHandler extends LoggedHandler {
 
     private final ProductRepository repository = new ProductRepository();
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Override
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         try {
             Map<String, String> pathParams = (Map<String, String>) input.get("pathParameters");
             String productId = pathParams.get("id");

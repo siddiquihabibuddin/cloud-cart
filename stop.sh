@@ -16,8 +16,9 @@ fi
 
 if [ -n "$(port_pids "$MCP_PORT")" ]; then
   log "Stopping MCP server..."
-  kill_port "$MCP_PORT"
+  stop_mcp
 fi
 
+observability_stop
 opensearch_stop
 emulator_stop

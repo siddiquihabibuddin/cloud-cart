@@ -1,5 +1,6 @@
 package com.cloudcart.search.repository;
 
+import com.cloudcart.common.http.LoggedHttp;
 import com.cloudcart.search.model.ProductDocument;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +17,7 @@ public class OpenSearchRepository {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+    private static final LoggedHttp OPENSEARCH = new LoggedHttp(HTTP_CLIENT, "search-service", "opensearch");
     private final String endpoint;
 
     public OpenSearchRepository() {
@@ -47,7 +49,7 @@ public class OpenSearchRepository {
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(mapping))
                 .build();
-            HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = OPENSEARCH.send(req, mapping);
             // 200 = created, 400 with resource_already_exists_exception is fine
             if (resp.statusCode() != 200 && resp.statusCode() != 400) {
                 System.err.println("ensureIndex unexpected status: " + resp.statusCode() + " " + resp.body());
@@ -64,7 +66,7 @@ public class OpenSearchRepository {
             .header("Content-Type", "application/json")
             .PUT(HttpRequest.BodyPublishers.ofString(json))
             .build();
-        HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = OPENSEARCH.send(req, json);
         if (resp.statusCode() != 200 && resp.statusCode() != 201) {
             throw new RuntimeException("indexDocument failed: " + resp.statusCode() + " " + resp.body());
         }
@@ -75,7 +77,7 @@ public class OpenSearchRepository {
             .uri(URI.create(endpoint + "/products/_doc/" + productId))
             .DELETE()
             .build();
-        HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = OPENSEARCH.send(req);
         // 200 or 404 both acceptable
         if (resp.statusCode() != 200 && resp.statusCode() != 404) {
             throw new RuntimeException("deleteDocument failed: " + resp.statusCode() + " " + resp.body());
@@ -94,12 +96,13 @@ public class OpenSearchRepository {
         body.putObject("query").set("multi_match", multiMatch);
         body.put("size", size);
 
+        String queryJson = MAPPER.writeValueAsString(body);
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(endpoint + "/products/_search"))
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
+            .POST(HttpRequest.BodyPublishers.ofString(queryJson))
             .build();
-        HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = OPENSEARCH.send(req, queryJson);
         if (resp.statusCode() != 200) {
             throw new RuntimeException("search failed: " + resp.statusCode() + " " + resp.body());
         }
@@ -125,7 +128,7 @@ public class OpenSearchRepository {
             .header("Content-Type", "application/x-ndjson")
             .POST(HttpRequest.BodyPublishers.ofString(ndjson.toString()))
             .build();
-        HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = OPENSEARCH.send(req, ndjson.toString());
         if (resp.statusCode() != 200) {
             throw new RuntimeException("bulkIndex failed: " + resp.statusCode() + " " + resp.body());
         }

@@ -1,8 +1,9 @@
 package com.cloudcart.shipment.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
-import com.cloudcart.shipment.util.JsonLogger;
+import com.cloudcart.common.handler.LoggedHandler;
+import com.cloudcart.common.log.JsonLogger;
+import com.cloudcart.common.messaging.Messaging;
 import com.cloudcart.shipment.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -14,12 +15,15 @@ import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
-import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
 import java.util.Map;
 
-public class ScanShipmentCreatedHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class ScanShipmentCreatedHandler extends LoggedHandler {
+
+    public ScanShipmentCreatedHandler() {
+        super("shipping-scanner");
+    }
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final MetricsEmitter METRICS = new MetricsEmitter("CloudCart/Shipping");
@@ -48,7 +52,7 @@ public class ScanShipmentCreatedHandler implements RequestHandler<Map<String, Ob
     }
 
     @Override
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         JsonLogger logger = new JsonLogger("shipping-scanner", null);
 
         try {
@@ -77,10 +81,7 @@ public class ScanShipmentCreatedHandler implements RequestHandler<Map<String, Ob
                             "orderId", orderId,
                             "userId", userId
                     ));
-                    SQS_CLIENT.sendMessage(SendMessageRequest.builder()
-                            .queueUrl(ORDER_SHIPPED_QUEUE_URL)
-                            .messageBody(messageBody)
-                            .build());
+                    Messaging.sendSqs(SQS_CLIENT, ORDER_SHIPPED_QUEUE_URL, messageBody, logger);
 
                     METRICS.count("ShipmentScanPublished");
                     count++;

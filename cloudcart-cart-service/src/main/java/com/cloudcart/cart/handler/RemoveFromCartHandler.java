@@ -1,21 +1,21 @@
 package com.cloudcart.cart.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.cart.repository.CartRepository;
 import com.cloudcart.cart.util.JwtVerificationException;
 import com.cloudcart.cart.util.JwtVerifier;
 
 import java.util.Map;
 
-public class RemoveFromCartHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class RemoveFromCartHandler extends LoggedHandler {
 
     private final CartRepository repository = new CartRepository();
     private final JwtVerifier jwtVerifier = new JwtVerifier(System.getenv("JWT_SECRET"));
 
     @Override
     @SuppressWarnings("unchecked")
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         try {
             String authenticatedUserId;
             try {

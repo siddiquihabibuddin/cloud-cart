@@ -1,7 +1,7 @@
 package com.cloudcart.auth.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.auth.model.User;
 import com.cloudcart.auth.repository.DynamoUserRepository;
 import com.cloudcart.auth.repository.UserRepository;
@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.ArrayList;
 
-public class RegisterHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
+public class RegisterHandler extends LoggedHandler {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -35,7 +35,7 @@ public class RegisterHandler implements RequestHandler<Map<String, Object>, Map<
     }
 
     @Override
-    public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+    protected Map<String, Object> process(Map<String, Object> input, Context context) {
         try {
             String body = (String) input.get("body");
             Map<String, Object> requestBody = MAPPER.readValue(body, new TypeReference<>() {});
