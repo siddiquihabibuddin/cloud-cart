@@ -9,8 +9,10 @@ logging:
       console: logstash
     json:
       rename:
-        "@timestamp": timestamp
-      exclude: "@version,level_value"
+        "[@timestamp]": timestamp
+      exclude:
+        - "@version"
+        - level_value
       add:
         service: mcp-server
 
