@@ -5,6 +5,7 @@ import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.order.model.OrderItem;
 import com.cloudcart.order.model.StockCompensationEvent;
 import com.cloudcart.order.repository.SagaRepository;
+import com.cloudcart.common.http.LoggedHttp;
 import com.cloudcart.common.log.JsonLogger;
 import com.cloudcart.order.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +37,7 @@ public class ProcessCompensationHandler extends LoggedHandler {
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
+    private static final LoggedHttp PRODUCT_API = new LoggedHttp(HTTP_CLIENT, "compensation-service", "product-api");
     private static final String PRODUCTS_API_URL = System.getenv("PRODUCTS_API_URL");
 
     static {
@@ -130,7 +132,7 @@ public class ProcessCompensationHandler extends LoggedHandler {
                     .timeout(Duration.ofSeconds(10))
                     .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> resp = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = PRODUCT_API.send(req, body);
             return resp.statusCode();
         } catch (HttpTimeoutException e) {
             logger.error("Timeout releasing stock", Map.of("productId", productId));

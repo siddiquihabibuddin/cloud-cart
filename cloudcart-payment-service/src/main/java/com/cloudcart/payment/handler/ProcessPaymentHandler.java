@@ -5,6 +5,7 @@ import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.payment.model.OrderPlacedEvent;
 import com.cloudcart.payment.model.PaymentSuccessEvent;
 import com.cloudcart.common.log.JsonLogger;
+import com.cloudcart.common.messaging.Messaging;
 import com.cloudcart.payment.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -18,7 +19,6 @@ import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
-import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.net.URI;
 import java.time.Instant;
@@ -128,10 +128,7 @@ public class ProcessPaymentHandler extends LoggedHandler {
                                     event.getOrderId(), event.getUserId(),
                                     event.getItems(), event.getTotalAmount()
                             );
-                            SQS_CLIENT.sendMessage(SendMessageRequest.builder()
-                                    .queueUrl(PAYMENT_SUCCESS_QUEUE_URL)
-                                    .messageBody(MAPPER.writeValueAsString(successEvent))
-                                    .build());
+                            Messaging.sendSqs(SQS_CLIENT, PAYMENT_SUCCESS_QUEUE_URL, MAPPER.writeValueAsString(successEvent), logger);
                             logger.info("Published PaymentSuccessEvent",
                                     Map.of("orderId", event.getOrderId()));
                         } catch (Exception sqsEx) {
@@ -173,10 +170,7 @@ public class ProcessPaymentHandler extends LoggedHandler {
                             compensationEvent.put("orderId", event.getOrderId());
                             compensationEvent.put("userId", event.getUserId());
                             compensationEvent.put("items", event.getItems());
-                            SQS_CLIENT.sendMessage(SendMessageRequest.builder()
-                                    .queueUrl(STOCK_COMPENSATION_QUEUE_URL)
-                                    .messageBody(MAPPER.writeValueAsString(compensationEvent))
-                                    .build());
+                            Messaging.sendSqs(SQS_CLIENT, STOCK_COMPENSATION_QUEUE_URL, MAPPER.writeValueAsString(compensationEvent), logger);
                             logger.info("Published StockCompensationEvent",
                                     Map.of("orderId", event.getOrderId()));
                         } catch (Exception sqsEx) {

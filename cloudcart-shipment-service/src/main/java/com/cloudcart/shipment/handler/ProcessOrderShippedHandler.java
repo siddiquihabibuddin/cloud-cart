@@ -4,6 +4,7 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.cloudcart.common.handler.LoggedHandler;
 import com.cloudcart.shipment.model.OrderShippedEvent;
 import com.cloudcart.common.log.JsonLogger;
+import com.cloudcart.common.messaging.Messaging;
 import com.cloudcart.shipment.util.MetricsEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -15,7 +16,6 @@ import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedExce
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.SnsClientBuilder;
-import software.amazon.awssdk.services.sns.model.PublishRequest;
 
 import java.net.URI;
 import java.time.Instant;
@@ -104,11 +104,8 @@ public class ProcessOrderShippedHandler extends LoggedHandler {
                         notification.put("orderId", event.getOrderId());
                         notification.put("userId", event.getUserId());
                         notification.put("trackingId", trackingId);
-                        SNS_CLIENT.publish(PublishRequest.builder()
-                                .topicArn(ORDER_SHIPPED_TOPIC_ARN)
-                                .subject("Your CloudCart order has shipped!")
-                                .message(MAPPER.writeValueAsString(notification))
-                                .build());
+                        Messaging.publishSns(SNS_CLIENT, ORDER_SHIPPED_TOPIC_ARN, "Your CloudCart order has shipped!",
+                                MAPPER.writeValueAsString(notification), logger);
                         logger.info("SNS shipping notification sent", Map.of("orderId", event.getOrderId()));
                     } catch (Exception snsEx) {
                         // Non-fatal: order IS shipped. Log and continue.

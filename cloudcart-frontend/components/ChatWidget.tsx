@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import { sendChatMessage, ChatApiMessage } from "@/lib/api";
+import { getLastCorrelationId } from "@/lib/correlation";
 
 interface DisplayMessage {
   role: "user" | "assistant";
@@ -49,7 +50,10 @@ export default function ChatWidget({ userId }: { userId: string | null }) {
       const res = await sendChatMessage(text, history);
       setHistory(res.history);
     } catch {
-      setError("Sorry, the assistant is unavailable right now. Please try again.");
+      const ref = getLastCorrelationId();
+      setError(
+        "Sorry, the assistant is unavailable right now. Please try again." + (ref ? ` (ref: ${ref})` : "")
+      );
       setHistory(history);
       setInput(text);
     } finally {

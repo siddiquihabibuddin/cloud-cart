@@ -1,7 +1,9 @@
 import axios, { AxiosInstance } from "axios";
+import { attachCorrelation } from "./correlation";
 import { clearSession, getToken } from "./session";
 
 function attachAuth(instance: AxiosInstance): AxiosInstance {
+  attachCorrelation(instance);
   instance.interceptors.request.use((config) => {
     const token = getToken();
     if (token) {
@@ -39,9 +41,9 @@ export const ordersApi = attachAuth(axios.create({
   headers: { "x-api-key": "cloudcart-dev-key-2024" },
 }));
 
-export const searchApi = axios.create({
+export const searchApi = attachCorrelation(axios.create({
   baseURL: process.env.NEXT_PUBLIC_SEARCH_API,
-});
+}));
 
 export const agentApi = attachAuth(axios.create({
   baseURL: process.env.NEXT_PUBLIC_AGENT_API,
