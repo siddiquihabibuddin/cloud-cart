@@ -328,26 +328,32 @@ The Angular app uses the same four proxy paths (`/api-products`, `/api-cart`, `/
 - Docker
 - Java 21 + Maven
 - Node.js 20+
-- LocalStack Pro (auth token required) — or LocalStack Community (`ACTIVATE_PRO=0`), which also works for every stack including search/OpenSearch
-- `awslocal` CLI (`pip install awscli-local`)
+- AWS CLI v2 (talks to the local emulator; fake credentials are supplied by the scripts). With `EMULATOR=localstack` you also need `awslocal` (`pip install awscli-local`)
+- No account or token is needed for the default emulator, [Floci](https://github.com/floci-io/floci) (free, MIT)
 - A free [Groq](https://console.groq.com) API key — only needed for the shopping assistant (`cloudcart-agent-service` + `cloudcart-mcp-server`); everything else works without it
 
 ## Getting Started
 
-### 1. Start LocalStack
+### 1. Start the local stack
 
 ```bash
-docker run -d \
-  --name localstack \
-  -p 4566:4566 \
-  -e LOCALSTACK_AUTH_TOKEN=<your-token> \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  localstack/localstack-pro:latest
+./start.sh     # emulator + OpenSearch + frontend (and the MCP server if GROQ_API_KEY is set)
+./stop.sh      # stop all of it
 ```
 
-### 2. Deploy all stacks
+The AWS emulator is selected with `EMULATOR` (default **`floci`**):
 
-Two equivalent deployment paths are available — pick one.
+| | `floci` (default) | `localstack` |
+|---|---|---|
+| Cost / account | Free, no token | Needs a LocalStack account + `LOCALSTACK_AUTH_TOKEN` (read from `~/.localstack/auth.json` if unset) |
+| Deployed stacks survive `./stop.sh` + `./start.sh` | Yes (persistent volume in `.dev/floci-data`) | No (in memory) — redeploy each time |
+| OpenSearch | Plain `opensearch` container started by `start.sh` (Floci stubs `AWS::OpenSearchService::Domain`) | Real domain created by the search stack |
+
+Both listen on `:4566` and serve API Gateway at `/restapis/<id>/dev/_user_request_/`, so templates and frontend config are identical. Only one can run at a time: `EMULATOR=localstack ./start.sh` (and `EMULATOR=localstack ./stop.sh`) switch emulators. After an image/license error, `./start.sh --update` pulls the latest image and recreates the container (stacks must then be redeployed).
+
+### 2. Deploy all stacks (first run, or after the emulator container is recreated)
+
+Two equivalent deployment paths are available — pick one. `./deploy-localstack.sh` (Option B, CloudFormation) works with both emulators (`EMULATOR=floci|localstack`) and is what `start.sh`/`seed-products.sh` integrate with. The Terraform path below still uses `awslocal` and has only been run against LocalStack, so it is untested on Floci.
 
 #### Option A: Terraform (recommended)
 
@@ -401,7 +407,7 @@ The script also enables DynamoDB Streams on `ProductsTableDev` (required for rea
 
 ### 3. Configure the frontend
 
-After deploy, grab the `UnifiedApiInternalUrl` from the gateway stack output and add it to `cloudcart-frontend/.env.local`:
+`./deploy-localstack.sh` writes `NEXT_PUBLIC_UNIFIED_API_INTERNAL` into `cloudcart-frontend/.env.local` for you (restart the frontend afterwards with `./stop.sh && ./start.sh`). Otherwise, grab the `UnifiedApiInternalUrl` from the gateway stack output and add it by hand:
 
 ```env
 NEXT_PUBLIC_PRODUCTS_API=/api-products

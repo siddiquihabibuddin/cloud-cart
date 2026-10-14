@@ -22,3 +22,6 @@ cloudcart-frontend/node_modules/
 
 # AWS / LocalStack
 .aws/
+
+# Local dev runner state/logs
+.dev/

@@ -1,6 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: '[DEV] Unified API Gateway — single entry point for all CloudCart services'
 
+Parameters:
+  IncludeAgentRoute:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: "Wire up POST /agent/chat. Requires the cloudcart-agent-dev stack (deployed when GROQ_API_KEY is set)."
+
+Conditions:
+  HasAgentRoute: !Equals [!Ref IncludeAgentRoute, "true"]
+  NoAgentRoute: !Not [!Condition HasAgentRoute]
+
 Resources:
 
   ### REST API ###
@@ -92,6 +103,7 @@ Resources:
 
   ### /agent/chat ###
   AgentResourceDev:
+    Condition: HasAgentRoute
     Type: AWS::ApiGateway::Resource
     Properties:
       RestApiId: !Ref UnifiedApiDev
@@ -99,6 +111,7 @@ Resources:
       PathPart: agent
 
   AgentChatResourceDev:
+    Condition: HasAgentRoute
     Type: AWS::ApiGateway::Resource
     Properties:
       RestApiId: !Ref UnifiedApiDev
@@ -203,6 +216,7 @@ Resources:
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UnifiedApiDev}/*/*"
 
   AgentChatPermissionDev:
+    Condition: HasAgentRoute
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
@@ -237,9 +251,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-products-ListProductsFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-products-ListProductsFunctionArn
+            - "/invocations"
 
   PostProductsMethodDev:
     Type: AWS::ApiGateway::Method
@@ -251,9 +269,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-products-CreateProductFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-products-CreateProductFunctionArn
+            - "/invocations"
 
   GetProductByIdMethodDev:
     Type: AWS::ApiGateway::Method
@@ -265,9 +287,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-products-GetProductFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-products-GetProductFunctionArn
+            - "/invocations"
 
   PatchStockMethodDev:
     Type: AWS::ApiGateway::Method
@@ -279,9 +305,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-products-UpdateStockFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-products-UpdateStockFunctionArn
+            - "/invocations"
 
   ### Methods — Cart ###
   PostCartMethodDev:
@@ -294,9 +324,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-cart-AddToCartFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-cart-AddToCartFunctionArn
+            - "/invocations"
 
   GetCartMethodDev:
     Type: AWS::ApiGateway::Method
@@ -308,9 +342,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-cart-ViewCartFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-cart-ViewCartFunctionArn
+            - "/invocations"
 
   DeleteCartMethodDev:
     Type: AWS::ApiGateway::Method
@@ -322,9 +360,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-cart-RemoveFromCartFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-cart-RemoveFromCartFunctionArn
+            - "/invocations"
 
   PatchCartMethodDev:
     Type: AWS::ApiGateway::Method
@@ -336,9 +378,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-cart-UpdateQuantityFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-cart-UpdateQuantityFunctionArn
+            - "/invocations"
 
   DeleteCartUserMethodDev:
     Type: AWS::ApiGateway::Method
@@ -350,9 +396,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-cart-ClearCartFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-cart-ClearCartFunctionArn
+            - "/invocations"
 
   ### Methods — Orders (API key required) ###
   PostOrderMethodDev:
@@ -366,9 +416,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-order-PlaceOrderFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-order-PlaceOrderFunctionArn
+            - "/invocations"
 
   ListOrdersMethodDev:
     Type: AWS::ApiGateway::Method
@@ -381,9 +435,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-order-ListOrdersFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-order-ListOrdersFunctionArn
+            - "/invocations"
 
   GetOrderMethodDev:
     Type: AWS::ApiGateway::Method
@@ -396,12 +454,17 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-order-GetOrderFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-order-GetOrderFunctionArn
+            - "/invocations"
 
   ### Methods — Agent chat ###
   PostAgentChatMethodDev:
+    Condition: HasAgentRoute
     Type: AWS::ApiGateway::Method
     Properties:
       RestApiId: !Ref UnifiedApiDev
@@ -411,9 +474,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-agent-AgentChatFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-agent-AgentChatFunctionArn
+            - "/invocations"
 
   ### Methods — Account auth ###
   PostRegisterMethodDev:
@@ -426,9 +493,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-auth-RegisterFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-auth-RegisterFunctionArn
+            - "/invocations"
 
   PostLoginMethodDev:
     Type: AWS::ApiGateway::Method
@@ -440,9 +511,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-auth-LoginFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-auth-LoginFunctionArn
+            - "/invocations"
 
   ### /search and /search/reindex ###
   SearchResourceDev:
@@ -486,9 +561,13 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-search-SearchProductsFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-search-SearchProductsFunctionArn
+            - "/invocations"
 
   PostReindexMethodDev:
     Type: AWS::ApiGateway::Method
@@ -500,13 +579,43 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub
-          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations"
-          - Fn: !ImportValue cloudcart-search-BulkReindexFunctionArn
+        Uri: !Join
+          - ""
+          - - "arn:aws:apigateway:"
+            - !Ref AWS::Region
+            - ":lambda:path/2015-03-31/functions/"
+            - !ImportValue cloudcart-search-BulkReindexFunctionArn
+            - "/invocations"
 
   ### Deployment & Stage ###
+  # DependsOn can't reference a conditional resource, so there is one deployment per case.
   UnifiedApiDeploymentDev:
     Type: AWS::ApiGateway::Deployment
+    Condition: NoAgentRoute
+    DependsOn:
+      - GetProductsMethodDev
+      - PostProductsMethodDev
+      - GetProductByIdMethodDev
+      - PatchStockMethodDev
+      - PostCartMethodDev
+      - GetCartMethodDev
+      - DeleteCartMethodDev
+      - PatchCartMethodDev
+      - DeleteCartUserMethodDev
+      - PostOrderMethodDev
+      - ListOrdersMethodDev
+      - GetOrderMethodDev
+      - GetSearchMethodDev
+      - PostReindexMethodDev
+      - PostRegisterMethodDev
+      - PostLoginMethodDev
+    Properties:
+      RestApiId: !Ref UnifiedApiDev
+      Description: "v4 - adds account auth endpoints"
+
+  UnifiedApiDeploymentAgentDev:
+    Type: AWS::ApiGateway::Deployment
+    Condition: HasAgentRoute
     DependsOn:
       - GetProductsMethodDev
       - PostProductsMethodDev
@@ -527,13 +636,13 @@ Resources:
       - PostLoginMethodDev
     Properties:
       RestApiId: !Ref UnifiedApiDev
-      Description: "v4 - adds account auth endpoints"
+      Description: "v4 - adds account auth endpoints (with agent route)"
 
   UnifiedApiStageDev:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref UnifiedApiDev
-      DeploymentId: !Ref UnifiedApiDeploymentDev
+      DeploymentId: !If [HasAgentRoute, !Ref UnifiedApiDeploymentAgentDev, !Ref UnifiedApiDeploymentDev]
       StageName: dev
 
   ### Usage Plan for /orders endpoints — reuses the existing API key from the order stack ###

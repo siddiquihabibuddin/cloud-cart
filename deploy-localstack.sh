@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH="$PATH:/Users/saifz7/Library/Python/3.9/bin"
+# shellcheck source=lib/emulator.sh
+source "$(cd "$(dirname "$0")" && pwd)/lib/emulator.sh"
+cd "$(dirname "$0")"
 
 CART_DIR="cloudcart-cart-service"
 PRODUCT_DIR="cloudcart-product-catalog-java"
@@ -52,21 +54,21 @@ if [ -n "${GROQ_API_KEY:-}" ]; then
 fi
 
 echo "==> Uploading JARs to S3..."
-awslocal s3 mb "s3://$S3_BUCKET" 2>/dev/null || true
-awslocal s3 cp "$CART_DIR/target/$CART_JAR"         "s3://$S3_BUCKET/$CART_JAR"
-awslocal s3 cp "$PRODUCT_DIR/target/$PRODUCT_JAR"   "s3://$S3_BUCKET/$PRODUCT_JAR"
-awslocal s3 cp "$ORDER_DIR/target/$ORDER_JAR"       "s3://$S3_BUCKET/$ORDER_JAR"
-awslocal s3 cp "$PAYMENT_DIR/target/$PAYMENT_JAR"   "s3://$S3_BUCKET/$PAYMENT_JAR"
-awslocal s3 cp "$SHIPMENT_DIR/target/$SHIPMENT_JAR" "s3://$S3_BUCKET/$SHIPMENT_JAR"
-awslocal s3 cp "$SEARCH_DIR/target/$SEARCH_JAR"       "s3://$S3_BUCKET/$SEARCH_JAR"
-awslocal s3 cp "$AUTH_DIR/target/$AUTH_JAR"           "s3://$S3_BUCKET/$AUTH_JAR"
+aws_cli s3 mb "s3://$S3_BUCKET" 2>/dev/null || true
+aws_cli s3 cp "$CART_DIR/target/$CART_JAR"         "s3://$S3_BUCKET/$CART_JAR"
+aws_cli s3 cp "$PRODUCT_DIR/target/$PRODUCT_JAR"   "s3://$S3_BUCKET/$PRODUCT_JAR"
+aws_cli s3 cp "$ORDER_DIR/target/$ORDER_JAR"       "s3://$S3_BUCKET/$ORDER_JAR"
+aws_cli s3 cp "$PAYMENT_DIR/target/$PAYMENT_JAR"   "s3://$S3_BUCKET/$PAYMENT_JAR"
+aws_cli s3 cp "$SHIPMENT_DIR/target/$SHIPMENT_JAR" "s3://$S3_BUCKET/$SHIPMENT_JAR"
+aws_cli s3 cp "$SEARCH_DIR/target/$SEARCH_JAR"       "s3://$S3_BUCKET/$SEARCH_JAR"
+aws_cli s3 cp "$AUTH_DIR/target/$AUTH_JAR"           "s3://$S3_BUCKET/$AUTH_JAR"
 if [ -n "${GROQ_API_KEY:-}" ]; then
-  awslocal s3 cp "$AGENT_DIR/target/$AGENT_JAR"         "s3://$S3_BUCKET/$AGENT_JAR"
+  aws_cli s3 cp "$AGENT_DIR/target/$AGENT_JAR"         "s3://$S3_BUCKET/$AGENT_JAR"
 fi
 
 cf_deploy() {
   # cloudformation deploy exits 255 when there are no changes; treat that as success
-  awslocal cloudformation deploy "$@" || { [ $? -eq 255 ] && echo "  (no changes)"; }
+  aws_cli cloudformation deploy "$@" || { [ $? -eq 255 ] && echo "  (no changes)"; }
 }
 
 echo "==> Deploying cart service stack..."
@@ -109,13 +111,24 @@ cf_deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides "JwtSecret=${JWT_SECRET}"
 
-echo "==> Enabling DynamoDB streams on ProductsTableDev (LocalStack requires CLI; CF attribute returns 'unknown')..."
-awslocal dynamodb update-table \
-  --table-name ProductsTableDev \
-  --stream-specification StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES 2>/dev/null || true
+if [ "$EMULATOR" = "localstack" ]; then
+  echo "==> Enabling DynamoDB streams on ProductsTableDev (LocalStack requires CLI; CF attribute returns 'unknown')..."
+  aws_cli dynamodb update-table \
+    --table-name ProductsTableDev \
+    --stream-specification StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES 2>/dev/null || true
+fi
+
+# Floci stubs AWS::OpenSearchService::Domain, so it uses the external OpenSearch container
+# (started by start.sh). LocalStack provisions a real domain, so the parameter stays empty.
+OPENSEARCH_ENDPOINT_PARAM=""
+if [ "$EMULATOR" = "floci" ]; then
+  OPENSEARCH_ENDPOINT_PARAM="$OPENSEARCH_INTERNAL_ENDPOINT"
+  curl -sf "http://localhost:$OPENSEARCH_PORT" >/dev/null 2>&1 \
+    || echo "  WARNING: OpenSearch is not running on :$OPENSEARCH_PORT (run ./start.sh); search will fail until it is"
+fi
 
 echo "==> Getting ProductsTableDev stream ARN..."
-STREAM_ARN=$(awslocal dynamodbstreams list-streams \
+STREAM_ARN=$(aws_cli dynamodbstreams list-streams \
   --table-name ProductsTableDev \
   --query "Streams[0].StreamArn" \
   --output text 2>/dev/null || echo "")
@@ -129,7 +142,7 @@ else
     --template-file "cloudcart-search-template.yaml" \
     --stack-name cloudcart-search-dev \
     --capabilities CAPABILITY_NAMED_IAM \
-    --parameter-overrides "ProductsTableStreamArn=${STREAM_ARN}"
+    --parameter-overrides "ProductsTableStreamArn=${STREAM_ARN}" "OpenSearchEndpoint=${OPENSEARCH_ENDPOINT_PARAM}"
 fi
 
 if [ -n "${GROQ_API_KEY:-}" ]; then
@@ -147,59 +160,62 @@ echo "==> Deploying unified gateway stack..."
 cf_deploy \
   --template-file "cloudcart-gateway-template.yaml" \
   --stack-name cloudcart-gateway-dev \
-  --capabilities CAPABILITY_IAM
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides "IncludeAgentRoute=$([ -n "${GROQ_API_KEY:-}" ] && echo true || echo false)"
 
 # LocalStack doesn't always replace the AWS::ApiGateway::Deployment resource when only
 # its Description/DependsOn change (real AWS does), which can leave the "dev" stage
-# serving a stale snapshot that's missing brand-new routes. Force a fresh deployment
-# unconditionally so newly-added routes are always live after this script runs.
-GATEWAY_ID=$(awslocal cloudformation describe-stacks \
-  --stack-name cloudcart-gateway-dev \
-  --query "Stacks[0].Outputs[?OutputKey=='UnifiedApiInternalUrl'].OutputValue" \
-  --output text | sed -E 's#.*/restapis/([^/]+)/.*#\1#')
-echo "==> Forcing a fresh gateway deployment (works around a LocalStack limitation)..."
-awslocal apigateway create-deployment --rest-api-id "$GATEWAY_ID" --stage-name dev >/dev/null
+# serving a stale snapshot that's missing brand-new routes. Force a fresh deployment so
+# newly-added routes are always live. Floci replaces the deployment correctly.
+if [ "$EMULATOR" = "localstack" ]; then
+  GATEWAY_ID=$(aws_cli cloudformation describe-stacks \
+    --stack-name cloudcart-gateway-dev \
+    --query "Stacks[0].Outputs[?OutputKey=='UnifiedApiInternalUrl'].OutputValue" \
+    --output text | sed -E 's#.*/restapis/([^/]+)/.*#\1#')
+  echo "==> Forcing a fresh gateway deployment (works around a LocalStack limitation)..."
+  aws_cli apigateway create-deployment --rest-api-id "$GATEWAY_ID" --stage-name dev >/dev/null
+fi
 
 echo ""
 echo "==> Stack outputs:"
 echo "--- Cart service ---"
-awslocal cloudformation describe-stacks \
+aws_cli cloudformation describe-stacks \
   --stack-name cloudcart-cart-dev \
   --query "Stacks[0].Outputs" \
   --output table
 
 echo "--- Product catalog ---"
-awslocal cloudformation describe-stacks \
+aws_cli cloudformation describe-stacks \
   --stack-name cloudcart-products-dev \
   --query "Stacks[0].Outputs" \
   --output table
 
 echo "--- Order service ---"
-awslocal cloudformation describe-stacks \
+aws_cli cloudformation describe-stacks \
   --stack-name cloudcart-order-dev \
   --query "Stacks[0].Outputs" \
   --output table
 
 echo "--- Shipment service ---"
-awslocal cloudformation describe-stacks \
+aws_cli cloudformation describe-stacks \
   --stack-name cloudcart-shipment-dev \
   --query "Stacks[0].Outputs" \
   --output table
 
 echo "--- Search service ---"
-awslocal cloudformation describe-stacks \
+aws_cli cloudformation describe-stacks \
   --stack-name cloudcart-search-dev \
   --query "Stacks[0].Outputs" \
   --output table
 
 echo "--- Auth service ---"
-awslocal cloudformation describe-stacks \
+aws_cli cloudformation describe-stacks \
   --stack-name cloudcart-auth-dev \
   --query "Stacks[0].Outputs" \
   --output table
 
 echo "--- Unified gateway ---"
-awslocal cloudformation describe-stacks \
+aws_cli cloudformation describe-stacks \
   --stack-name cloudcart-gateway-dev \
   --query "Stacks[0].Outputs" \
   --output table
@@ -218,4 +234,15 @@ if [ -n "${GROQ_API_KEY:-}" ]; then
   echo "    (use the same gateway API id printed in the UnifiedApiInternalUrl output above)"
   echo ""
 fi
-bash "$(dirname "$0")/seed-products.sh"
+GATEWAY_URL="$(gateway_url || true)"
+if [ -n "$GATEWAY_URL" ]; then
+  ENV_FILE="cloudcart-frontend/.env.local"
+  touch "$ENV_FILE"
+  if grep -q '^NEXT_PUBLIC_UNIFIED_API_INTERNAL=' "$ENV_FILE"; then
+    sed -i.bak "s#^NEXT_PUBLIC_UNIFIED_API_INTERNAL=.*#NEXT_PUBLIC_UNIFIED_API_INTERNAL=${GATEWAY_URL}#" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  else
+    echo "NEXT_PUBLIC_UNIFIED_API_INTERNAL=${GATEWAY_URL}" >> "$ENV_FILE"
+  fi
+  echo "==> Pointed cloudcart-frontend/.env.local at the new gateway (restart the frontend: ./stop.sh && ./start.sh)"
+fi
+PRODUCTS_API="$GATEWAY_URL" bash "$(dirname "$0")/seed-products.sh"

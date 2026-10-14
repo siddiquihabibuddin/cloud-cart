@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# Shared helpers for start.sh, stop.sh and deploy-localstack.sh. Sourced, not executed.
+#
+# EMULATOR selects the local AWS emulator (default: floci):
+#   floci       free, MIT, no token (https://github.com/floci-io/floci)
+#   localstack  needs a LocalStack account/auth token; state is lost on restart in the free tier
+#
+# Both listen on :4566 and serve API Gateway at /restapis/<id>/<stage>/_user_request_/, so the
+# templates, frontend rewrites and MCP config are identical for either. Only one can run at a time.
+
+ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+STATE_DIR="$ROOT/.dev"
+FRONTEND_PORT=3000
+MCP_PORT=8090
+EMULATOR="${EMULATOR:-floci}"
+EMULATOR_PORT=4566
+EMULATOR_ENDPOINT="http://localhost:$EMULATOR_PORT"
+OPENSEARCH_CONTAINER="${OPENSEARCH_CONTAINER:-opensearch}"
+OPENSEARCH_PORT=9200
+# Where Lambda containers reach the host-side OpenSearch container
+OPENSEARCH_INTERNAL_ENDPOINT="http://host.docker.internal:$OPENSEARCH_PORT"
+export PATH="$PATH:$HOME/Library/Python/3.9/bin"
+
+mkdir -p "$STATE_DIR"
+
+case "$EMULATOR" in
+  floci|localstack) ;;
+  *) echo "Unknown EMULATOR '$EMULATOR' (use floci or localstack)" >&2; exit 1 ;;
+esac
+
+log() { echo "==> $*"; }
+warn() { echo "  WARNING: $*" >&2; }
+
+port_pids() { lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null || true; }
+
+kill_port() {
+  local pids
+  pids="$(port_pids "$1")"
+  [ -z "$pids" ] && return 0
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    [ -z "$(port_pids "$1")" ] && return 0
+    sleep 1
+  done
+  # shellcheck disable=SC2046
+  kill -9 $(port_pids "$1") 2>/dev/null || true
+}
+
+wait_for_port() { # port, seconds
+  for _ in $(seq 1 "$2"); do
+    [ -n "$(port_pids "$1")" ] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# AWS CLI pointed at the active emulator
+aws_cli() {
+  if [ "$EMULATOR" = "localstack" ]; then
+    awslocal "$@"
+  else
+    AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 AWS_PAGER="" \
+      aws --endpoint-url "$EMULATOR_ENDPOINT" "$@"
+  fi
+}
+
+container_running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || echo false)" = "true" ]; }
+container_exists() { docker inspect "$1" >/dev/null 2>&1; }
+
+emulator_container() { echo "$EMULATOR"; }
+emulator_running() { container_running "$(emulator_container)"; }
+
+emulator_health_url() {
+  if [ "$EMULATOR" = "localstack" ]; then
+    echo "$EMULATOR_ENDPOINT/_localstack/health"
+  else
+    echo "$EMULATOR_ENDPOINT/_floci/health"
+  fi
+}
+
+emulator_image() {
+  if [ "$EMULATOR" = "localstack" ]; then
+    echo "localstack/localstack-pro:latest"
+  else
+    echo "floci/floci:latest"
+  fi
+}
+
+# Only one emulator can own :4566
+check_port_free_of_other_emulator() {
+  local other="localstack"
+  [ "$EMULATOR" = "localstack" ] && other="floci"
+  if container_running "$other"; then
+    echo "The '$other' container is running and owns :$EMULATOR_PORT. Stop it first (docker stop $other, or EMULATOR=$other ./stop.sh)." >&2
+    exit 1
+  fi
+}
+
+create_emulator_container() {
+  local name
+  name="$(emulator_container)"
+  log "Creating $EMULATOR container '$name'..."
+  if [ "$EMULATOR" = "floci" ]; then
+    # hybrid storage + volume keeps deployed stacks across ./stop.sh and ./start.sh
+    docker run -d --name "$name" -p "$EMULATOR_PORT:4566" -u root \
+      -e FLOCI_STORAGE_MODE=hybrid \
+      -e FLOCI_STORAGE_PERSISTENT_PATH=/data \
+      -v "$STATE_DIR/floci-data:/data" \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      "$(emulator_image)" >/dev/null
+  else
+    if [ -z "${LOCALSTACK_AUTH_TOKEN:-}" ] && [ -f "$HOME/.localstack/auth.json" ]; then
+      LOCALSTACK_AUTH_TOKEN="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("LOCALSTACK_AUTH_TOKEN",""))' "$HOME/.localstack/auth.json" 2>/dev/null || true)"
+    fi
+    if [ -n "${LOCALSTACK_AUTH_TOKEN:-}" ]; then
+      docker run -d --name "$name" -p "$EMULATOR_PORT:4566" \
+        -e LOCALSTACK_AUTH_TOKEN="$LOCALSTACK_AUTH_TOKEN" \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        "$(emulator_image)" >/dev/null
+    else
+      warn "LOCALSTACK_AUTH_TOKEN not set; using LocalStack Community"
+      docker run -d --name "$name" -p "$EMULATOR_PORT:4566" -e ACTIVATE_PRO=0 \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        localstack/localstack:latest >/dev/null
+    fi
+  fi
+}
+
+# emulator_start [--update]   --update pulls the latest image and recreates the container
+emulator_start() {
+  command -v docker >/dev/null || { echo "docker not found" >&2; exit 1; }
+  local name
+  name="$(emulator_container)"
+  check_port_free_of_other_emulator
+
+  if [ "${1:-}" = "--update" ]; then
+    log "Pulling the latest $EMULATOR image..."
+    docker pull "$(emulator_image)"
+    container_exists "$name" && { log "Removing old container '$name'..."; docker rm -f "$name" >/dev/null; }
+  fi
+
+  if emulator_running; then
+    log "$EMULATOR already running"
+  elif container_exists "$name"; then
+    log "Starting existing $EMULATOR container '$name'..."
+    docker start "$name" >/dev/null
+  else
+    create_emulator_container
+    warn "fresh container: run ./deploy-localstack.sh to deploy the stacks"
+  fi
+
+  log "Waiting for $EMULATOR on :$EMULATOR_PORT..."
+  for _ in $(seq 1 60); do
+    curl -sf "$(emulator_health_url)" >/dev/null 2>&1 && return 0
+    if ! emulator_running; then
+      echo "$EMULATOR exited during startup. Last log lines:" >&2
+      docker logs --tail 15 "$name" >&2 || true
+      echo "" >&2
+      echo "If this is an image/license error, run: ./start.sh --update (a new container has no stacks deployed)" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+  echo "$EMULATOR did not become healthy after 2 minutes; see: docker logs $name" >&2
+  exit 1
+}
+
+emulator_stop() {
+  if emulator_running; then
+    log "Stopping $EMULATOR..."
+    docker stop "$(emulator_container)" >/dev/null
+  else
+    log "$EMULATOR not running"
+  fi
+}
+
+# Floci stubs AWS::OpenSearchService::Domain, so search runs against a plain OpenSearch container
+# (the search template takes its endpoint as a parameter). LocalStack provides a real domain.
+opensearch_start() {
+  [ "$EMULATOR" = "floci" ] || return 0
+  if container_running "$OPENSEARCH_CONTAINER"; then
+    log "OpenSearch already running"
+    return 0
+  fi
+  if container_exists "$OPENSEARCH_CONTAINER"; then
+    log "Starting OpenSearch..."
+    docker start "$OPENSEARCH_CONTAINER" >/dev/null
+  else
+    log "Creating OpenSearch container '$OPENSEARCH_CONTAINER'..."
+    docker run -d --name "$OPENSEARCH_CONTAINER" -p "$OPENSEARCH_PORT:9200" \
+      -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true -e DISABLE_INSTALL_DEMO_CONFIG=true \
+      -e OPENSEARCH_JAVA_OPTS="-Xms512m -Xmx512m" \
+      opensearchproject/opensearch:2.13.0 >/dev/null
+  fi
+  for _ in $(seq 1 40); do
+    curl -sf "http://localhost:$OPENSEARCH_PORT" >/dev/null 2>&1 && return 0
+    sleep 3
+  done
+  warn "OpenSearch not responding on :$OPENSEARCH_PORT yet; search may be unavailable"
+}
+
+opensearch_stop() {
+  if container_running "$OPENSEARCH_CONTAINER"; then
+    log "Stopping OpenSearch..."
+    docker stop "$OPENSEARCH_CONTAINER" >/dev/null
+  fi
+}
+
+gateway_url() {
+  local id
+  id="$(aws_cli apigateway get-rest-apis --query "items[?name=='UnifiedApiDev'].id | [0]" --output text 2>/dev/null || true)"
+  [ -n "$id" ] && [ "$id" != "None" ] || return 1
+  echo "$EMULATOR_ENDPOINT/restapis/$id/dev/_user_request_"
+}
