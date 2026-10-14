@@ -15,6 +15,17 @@ MCP_PORT=8090
 EMULATOR="${EMULATOR:-floci}"
 EMULATOR_PORT=4566
 EMULATOR_ENDPOINT="http://localhost:$EMULATOR_PORT"
+# Log search UI (Loki + Alloy + Grafana). OBSERVABILITY=off skips it.
+OBSERVABILITY="${OBSERVABILITY:-on}"
+OBS_NETWORK="cloudcart-obs"
+LOKI_CONTAINER="cloudcart-loki"
+ALLOY_CONTAINER="cloudcart-alloy"
+GRAFANA_CONTAINER="cloudcart-grafana"
+LOKI_PORT=3100
+GRAFANA_PORT=3001
+LOKI_IMAGE="grafana/loki:3.4.2"
+ALLOY_IMAGE="grafana/alloy:v1.8.1"
+GRAFANA_IMAGE="grafana/grafana:11.5.2"
 OPENSEARCH_CONTAINER="${OPENSEARCH_CONTAINER:-opensearch}"
 OPENSEARCH_PORT=9200
 # Where Lambda containers reach the host-side OpenSearch container
@@ -53,6 +64,20 @@ wait_for_port() { # port, seconds
     sleep 1
   done
   return 1
+}
+
+# Stop the MCP server (started as `mvn spring-boot:run`). The Maven parent goes first: if only the
+# JVM is killed, Maven prints a "Failed to execute goal ... exit code 143" banner into mcp.log.
+stop_mcp() {
+  local pid ppid
+  pid="$(port_pids "$MCP_PORT" | head -1)"
+  [ -z "$pid" ] && return 0
+  ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  if [ -n "$ppid" ] && ps -o command= -p "$ppid" 2>/dev/null | grep -q "spring-boot:run"; then
+    kill "$ppid" 2>/dev/null || true
+    sleep 2
+  fi
+  kill_port "$MCP_PORT"
 }
 
 # AWS CLI pointed at the active emulator
@@ -205,6 +230,67 @@ opensearch_stop() {
     log "Stopping OpenSearch..."
     docker stop "$OPENSEARCH_CONTAINER" >/dev/null
   fi
+}
+
+observability_enabled() { [ "$OBSERVABILITY" != "off" ]; }
+
+# start_container <name> <docker run args...>: start it if it exists, else create it
+start_container() {
+  local name="$1"; shift
+  if container_running "$name"; then
+    return 0
+  elif container_exists "$name"; then
+    docker start "$name" >/dev/null
+  else
+    docker run -d --name "$name" "$@" >/dev/null
+  fi
+}
+
+# Loki stores logs, Alloy ships them (Lambda containers, the emulator, and .dev/*.log from the host
+# processes), Grafana is the UI. Data lives in named volumes, so logs survive ./stop.sh.
+observability_start() {
+  if ! observability_enabled; then
+    log "Observability disabled (OBSERVABILITY=off)"
+    return 0
+  fi
+  log "Starting Loki + Alloy + Grafana..."
+  docker network inspect "$OBS_NETWORK" >/dev/null 2>&1 || docker network create "$OBS_NETWORK" >/dev/null
+
+  start_container "$LOKI_CONTAINER" --network "$OBS_NETWORK" -p "$LOKI_PORT:3100" \
+    -v "$ROOT/observability/loki.yaml:/etc/loki/local-config.yaml:ro" \
+    -v cloudcart-loki-data:/loki \
+    "$LOKI_IMAGE" -config.file=/etc/loki/local-config.yaml
+  for _ in $(seq 1 40); do
+    curl -sf "http://localhost:$LOKI_PORT/ready" >/dev/null 2>&1 && break
+    sleep 2
+  done
+  curl -sf "http://localhost:$LOKI_PORT/ready" >/dev/null 2>&1 || warn "Loki not ready yet; logs will appear once it is"
+
+  start_container "$ALLOY_CONTAINER" --network "$OBS_NETWORK" \
+    -v "$ROOT/observability/alloy.alloy:/etc/alloy/config.alloy:ro" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$STATE_DIR:/logs:ro" \
+    "$ALLOY_IMAGE" run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+
+  start_container "$GRAFANA_CONTAINER" --network "$OBS_NETWORK" -p "$GRAFANA_PORT:3000" \
+    -e GF_AUTH_ANONYMOUS_ENABLED=true -e GF_AUTH_ANONYMOUS_ORG_ROLE=Admin -e GF_AUTH_DISABLE_LOGIN_FORM=true \
+    -e GF_ANALYTICS_REPORTING_ENABLED=false -e GF_ANALYTICS_CHECK_FOR_UPDATES=false \
+    -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/cloudcart.json \
+    -v "$ROOT/observability/grafana/provisioning:/etc/grafana/provisioning:ro" \
+    -v "$ROOT/observability/grafana/dashboards:/etc/grafana/dashboards:ro" \
+    -v cloudcart-grafana-data:/var/lib/grafana \
+    "$GRAFANA_IMAGE"
+  log "Grafana: http://localhost:$GRAFANA_PORT  (no login; dashboard 'CloudCart Logs')"
+}
+
+observability_stop() {
+  local c
+  for c in "$GRAFANA_CONTAINER" "$ALLOY_CONTAINER" "$LOKI_CONTAINER"; do
+    if container_running "$c"; then
+      log "Stopping $c..."
+      docker stop "$c" >/dev/null
+    fi
+  done
 }
 
 gateway_url() {

@@ -1,0 +1,156 @@
+// Grafana Alloy: ships CloudCart logs to Loki.
+//
+//   Floci (default)   Lambda stdout is relayed in the floci container's own log as
+//                     "... [lambda:<Function>] <json>". That one stable stream has no discovery race
+//                     (Lambda containers come and go, and a cold start's first lines would be missed
+//                     by container discovery), so the wrapper is parsed here.
+//   LocalStack        Lambda containers are named localstack-main-lambda-*, collected directly.
+//   host processes    the MCP server and the frontend write .dev/*.log (mounted at /logs).
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "2s"
+}
+
+// ---- emulator container (Floci or LocalStack): its own logs + relayed Lambda output ----
+discovery.relabel "emulator" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(floci|localstack)"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "service"
+  }
+  rule {
+    target_label = "source"
+    replacement  = "emulator"
+  }
+}
+
+loki.source.docker "emulator" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.emulator.output
+  forward_to = [loki.process.emulator.receiver]
+}
+
+loki.process "emulator" {
+  // "2026-10-14 06:59:39,641 INFO  [...ContainerLogStreamer] [lambda:AgentChatFunctionDev] {json}"
+  stage.match {
+    selector = "{source=\"emulator\"} |~ \"\\\\[lambda:\""
+
+    stage.regex {
+      expression = "\\[lambda:(?P<function>[A-Za-z0-9_.-]+)\\] (?P<payload>.*)$"
+    }
+    stage.labels {
+      values = { function = "" }
+    }
+    stage.static_labels {
+      values = { source = "lambda" }
+    }
+    // replace the line with just the Lambda's own output
+    stage.output {
+      source = "payload"
+    }
+  }
+  forward_to = [loki.process.json.receiver]
+}
+
+// ---- LocalStack's Lambda containers (names like localstack-main-lambda-<function>-<id>) ----
+discovery.relabel "localstack_lambda" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/localstack-main-lambda-.*"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/localstack-main-lambda-(.*)-[0-9a-f]{8,}"
+    target_label  = "function"
+  }
+  rule {
+    target_label = "source"
+    replacement  = "lambda"
+  }
+}
+
+loki.source.docker "localstack_lambda" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.localstack_lambda.output
+  forward_to = [loki.process.json.receiver]
+}
+
+// ---- host processes started by start.sh ----
+local.file_match "host" {
+  path_targets = [
+    {"__path__" = "/logs/mcp.log", "source" = "host", "service" = "mcp-server"},
+    {"__path__" = "/logs/frontend.log", "source" = "host", "service" = "frontend"},
+  ]
+}
+
+loki.source.file "host" {
+  targets    = local.file_match.host.targets
+  forward_to = [loki.process.json.receiver]
+}
+
+// ---- common: parse our JSON schema into labels ----
+loki.process "json" {
+  // CloudWatch EMF metric lines and JVM startup noise are not useful in a log UI
+  stage.drop {
+    expression = "\"_aws\":"
+  }
+  stage.drop {
+    expression = "^SLF4J:"
+  }
+
+  stage.json {
+    expressions = {
+      level          = "level",
+      jsonservice    = "service",
+      event          = "event",
+      correlation_id = "correlationId",
+      ts             = "timestamp",
+    }
+  }
+
+  stage.timestamp {
+    source            = "ts"
+    format            = "RFC3339Nano"
+    action_on_failure = "skip"
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+      event = "",
+    }
+  }
+
+  // a "service" inside the JSON wins over the container/file default
+  stage.template {
+    source   = "service"
+    template = "{{ if .jsonservice }}{{ .jsonservice }}{{ else }}{{ .service }}{{ end }}"
+  }
+  stage.labels {
+    values = { service = "" }
+  }
+
+  // searchable without parsing:  {service="agent-service"} | correlation_id="abc"
+  stage.structured_metadata {
+    values = { correlation_id = "" }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://cloudcart-loki:3100/loki/api/v1/push"
+  }
+}
