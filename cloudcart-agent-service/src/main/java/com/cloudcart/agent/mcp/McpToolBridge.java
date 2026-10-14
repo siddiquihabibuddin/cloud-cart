@@ -1,5 +1,9 @@
 package com.cloudcart.agent.mcp;
 
+import com.cloudcart.common.log.Correlation;
+import com.cloudcart.common.log.JsonLogger;
+import com.cloudcart.common.log.LogConfig;
+import com.cloudcart.common.log.Redactor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpClient;
@@ -18,12 +22,17 @@ public class McpToolBridge implements ToolBridge {
 
     private final McpSyncClient client;
     private final ObjectMapper mapper;
+    private final JsonLogger log = new JsonLogger("agent-service");
 
     public McpToolBridge(String mcpServerUrl, ObjectMapper mapper) {
         this.mapper = mapper;
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport
                 .builder(mcpServerUrl)
                 .jsonMapper(new JacksonMcpJsonMapper(mapper))
+                // Evaluated on every HTTP call, so the MCP server and everything it calls
+                // downstream log under this request's correlation id.
+                .httpRequestCustomizer((builder, method, uri, body, context) ->
+                        builder.setHeader(Correlation.HEADER, Correlation.current()))
                 .build();
         this.client = McpClient.sync(transport)
                 .requestTimeout(Duration.ofSeconds(20))
@@ -38,7 +47,23 @@ public class McpToolBridge implements ToolBridge {
 
     @Override
     public List<Map<String, Object>> listGroqTools() {
-        List<McpSchema.Tool> tools = client.listTools().tools();
+        Map<String, Object> req = new LinkedHashMap<>();
+        req.put("method", "tools/list");
+        log.event("mcp.request", "MCP tools/list", req);
+        long start = System.nanoTime();
+        List<McpSchema.Tool> tools;
+        try {
+            tools = client.listTools().tools();
+        } catch (RuntimeException e) {
+            logFailure("tools/list", null, start, e);
+            throw e;
+        }
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("method", "tools/list");
+        res.put("durationMs", elapsedMs(start));
+        res.put("toolCount", tools.size());
+        res.put("toolNames", tools.stream().map(McpSchema.Tool::name).toList());
+        log.event("mcp.response", "MCP tools/list returned " + tools.size() + " tools", res);
         List<Map<String, Object>> groqTools = new ArrayList<>();
         for (McpSchema.Tool tool : tools) {
             groqTools.add(Map.of(
@@ -90,8 +115,20 @@ public class McpToolBridge implements ToolBridge {
                 ? Map.of()
                 : mapper.readValue(argumentsJson, new TypeReference<Map<String, Object>>() {});
 
-        McpSchema.CallToolResult result = client.callTool(
-                McpSchema.CallToolRequest.builder(name).arguments(arguments).build());
+        Map<String, Object> req = new LinkedHashMap<>();
+        req.put("method", "tools/call");
+        req.put("tool", name);
+        req.put("arguments", Redactor.body((Object) arguments));
+        log.event("mcp.request", "MCP tools/call " + name, req);
+
+        long start = System.nanoTime();
+        McpSchema.CallToolResult result;
+        try {
+            result = client.callTool(McpSchema.CallToolRequest.builder(name).arguments(arguments).build());
+        } catch (RuntimeException e) {
+            logFailure("tools/call", name, start, e);
+            throw e;
+        }
 
         StringBuilder text = new StringBuilder();
         for (McpSchema.Content content : result.content()) {
@@ -99,6 +136,30 @@ public class McpToolBridge implements ToolBridge {
                 text.append(textContent.text());
             }
         }
+
+        boolean isError = Boolean.TRUE.equals(result.isError());
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("method", "tools/call");
+        res.put("tool", name);
+        res.put("isError", isError);
+        res.put("durationMs", elapsedMs(start));
+        res.put("body", Redactor.body(text.toString()));
+        log.event(isError ? LogConfig.Level.WARN : LogConfig.Level.INFO, "mcp.response",
+                "MCP tools/call " + name + (isError ? " returned an error" : " returned"), res);
         return text.toString();
+    }
+
+    private void logFailure(String method, String tool, long startNanos, RuntimeException e) {
+        Map<String, Object> err = new LinkedHashMap<>();
+        err.put("method", method);
+        err.put("tool", tool);
+        err.put("durationMs", elapsedMs(startNanos));
+        err.put("errorType", e.getClass().getName());
+        err.put("errorMessage", Redactor.sanitizeText(String.valueOf(e.getMessage())));
+        log.event(LogConfig.Level.ERROR, "mcp.response", "MCP " + method + " failed", err);
+    }
+
+    private static long elapsedMs(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 }

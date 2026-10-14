@@ -97,4 +97,33 @@ class JsonLoggerTest {
         new JsonLogger("svc").event("llm.request", "calling", Map.of("model", "m"));
         assertEquals("llm.request", logs.line(0).get("event"));
     }
+
+    @Test
+    void eachThreadSeesItsOwnCorrelationId() throws Exception {
+        Correlation.set("main-thread");
+        java.util.concurrent.atomic.AtomicReference<String> seenInWorker = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            Correlation.set("worker-thread");
+            seenInWorker.set(Correlation.current());
+        });
+        worker.start();
+        worker.join();
+
+        assertEquals("worker-thread", seenInWorker.get());
+        assertEquals("main-thread", Correlation.current());
+    }
+
+    @Test
+    void aThreadThatNeverSetOneFallsBackToTheLastIdSet() throws Exception {
+        // Lambda helper threads (e.g. the MCP client) never call set(); they must still log under
+        // the id of the invocation in progress.
+        Correlation.set("invocation-1");
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread helper = new Thread(() -> seen.set(Correlation.current()));
+        // an unrelated pooled thread: start it before the id is set so nothing is inherited
+        helper.start();
+        helper.join();
+
+        assertEquals("invocation-1", seen.get());
+    }
 }
