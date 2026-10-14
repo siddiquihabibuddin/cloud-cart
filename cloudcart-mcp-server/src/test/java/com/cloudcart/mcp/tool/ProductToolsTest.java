@@ -49,6 +49,26 @@ class ProductToolsTest {
     }
 
     @Test
+    void searchProductsCapsResultsButReportsTheFullTotal() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://gateway.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        StringBuilder json = new StringBuilder("{\"products\":[");
+        for (int i = 0; i < 8; i++) {
+            json.append(i > 0 ? "," : "").append("{\"productId\":\"p").append(i).append("\",\"price\":10}");
+        }
+        json.append("],\"total\":8}");
+        server.expect(requestTo("http://gateway.test/search?q=mouse"))
+                .andRespond(withSuccess(json.toString(), MediaType.APPLICATION_JSON));
+
+        ProductTools tools = new ProductTools(builder.build());
+        Map<String, Object> result = tools.searchProducts("mouse", null);
+
+        assertThat((java.util.List<?>) result.get("products")).hasSize(ProductTools.MAX_SEARCH_RESULTS);
+        assertThat(result.get("total")).isEqualTo(8);
+        server.verify();
+    }
+
+    @Test
     void getProductReturnsErrorMapOnFailure() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://gateway.test");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
