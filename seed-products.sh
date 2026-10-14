@@ -2,7 +2,10 @@
 # Idempotent product seed — re-running is safe (duplicate titles just create new IDs).
 set -euo pipefail
 
-PRODUCTS_API="${PRODUCTS_API:-http://localhost:4566/restapis/26xqmiqwkx/dev/_user_request_}"
+# shellcheck source=lib/emulator.sh
+source "$(cd "$(dirname "$0")" && pwd)/lib/emulator.sh"
+PRODUCTS_API="${PRODUCTS_API:-$(gateway_url || true)}"
+[ -n "$PRODUCTS_API" ] || { echo "Could not find the UnifiedApiDev gateway; deploy first or set PRODUCTS_API" >&2; exit 1; }
 
 post() {
   curl -sf -X POST "$PRODUCTS_API/products" \

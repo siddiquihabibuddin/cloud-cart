@@ -2,15 +2,24 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: '[DEV] OpenSearch domain + Lambda search service for CloudCart'
 
 Parameters:
+  OpenSearchEndpoint:
+    Type: String
+    Default: ""
+    Description: "Existing OpenSearch endpoint (e.g. http://host.docker.internal:9200). Empty = create an OpenSearch domain. Floci does not emulate domains, so start.sh runs an OpenSearch container and passes this."
   ProductsTableStreamArn:
     Type: String
     Description: "DynamoDB stream ARN for ProductsTableDev (LocalStack returns unknown via CF, so passed explicitly)"
+
+Conditions:
+  UseExternalOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
+  CreateDomain: !Equals [!Ref OpenSearchEndpoint, ""]
 
 Resources:
 
   ### OpenSearch Domain ###
   SearchDomain:
     Type: AWS::OpenSearchService::Domain
+    Condition: CreateDomain
     Properties:
       DomainName: cloudcart-search-dev
       EngineVersion: OpenSearch_2.13
@@ -65,7 +74,6 @@ Resources:
                   - es:ESHttpDelete
                   - es:ESHttpHead
                 Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/cloudcart-search-dev/*"
-    DependsOn: SearchDomain
 
   ### Lambda Functions ###
   StreamIndexFunctionDev:
@@ -82,7 +90,7 @@ Resources:
       MemorySize: 256
       Environment:
         Variables:
-          OPENSEARCH_ENDPOINT: !Sub "http://${SearchDomain.DomainEndpoint}"
+          OPENSEARCH_ENDPOINT: !If [UseExternalOpenSearch, !Ref OpenSearchEndpoint, !Sub "http://${SearchDomain.DomainEndpoint}"]
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   SearchProductsFunctionDev:
@@ -99,7 +107,7 @@ Resources:
       MemorySize: 256
       Environment:
         Variables:
-          OPENSEARCH_ENDPOINT: !Sub "http://${SearchDomain.DomainEndpoint}"
+          OPENSEARCH_ENDPOINT: !If [UseExternalOpenSearch, !Ref OpenSearchEndpoint, !Sub "http://${SearchDomain.DomainEndpoint}"]
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
   BulkReindexFunctionDev:
@@ -116,7 +124,7 @@ Resources:
       MemorySize: 256
       Environment:
         Variables:
-          OPENSEARCH_ENDPOINT: !Sub "http://${SearchDomain.DomainEndpoint}"
+          OPENSEARCH_ENDPOINT: !If [UseExternalOpenSearch, !Ref OpenSearchEndpoint, !Sub "http://${SearchDomain.DomainEndpoint}"]
           PRODUCTS_TABLE: !ImportValue cloudcart-products-ProductsTableName
           AWS_ENDPOINT_URL: http://host.docker.internal:4566
 
@@ -145,4 +153,4 @@ Outputs:
 
   OpenSearchEndpoint:
     Description: "OpenSearch domain endpoint"
-    Value: !Sub "http://${SearchDomain.DomainEndpoint}"
+    Value: !If [UseExternalOpenSearch, !Ref OpenSearchEndpoint, !Sub "http://${SearchDomain.DomainEndpoint}"]
